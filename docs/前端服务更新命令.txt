@@ -1,0 +1,3 @@
+cd /opt/cipherws && git pull
+cd frontend && npm run build
+sudo systemctl restart cipherws-web
