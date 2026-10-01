@@ -1,20 +1,25 @@
-# ===== CipherWS 根 .gitignore =====
-# 说明：本仓库为前后端同仓结构
-#   frontend/  前端（Vue3 + Vite）
-#   server/    后端（Spring Boot / Maven）
-# 判断原则：能由 package.json / pom.xml 重新生成的产物一律不进仓库。
+# ===== CipherWS .gitignore =====
+# 仓库结构（前后端同仓）：
+#   frontend/  Vue3 + Vite，依赖与产物由 package.json 还原
+#   server/    Spring Boot + Maven（Maven 根目录就在 server/ 这一层），
+#              依赖与产物由 pom.xml 还原
+#   deploy/    部署脚本/配置
+#   docs/      文档
+# 判断原则：能由 package.json / pom.xml 重新生成的产物一律不入库。
 
 # ---------- 通用 ----------
 .DS_Store
 Thumbs.db
+desktop.ini
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+lerna-debug.log*
 *.local
 
-# 临时/缓存
+# 临时 / 缓存
 .cache/
 .temp/
 .tmp/
@@ -30,12 +35,15 @@ pnpm-debug.log*
 *.user
 *.userosscache
 *.sln.docstates
+*.swp
+*~
 
-# ---------- 前端（frontend/）----------
+# ---------- 前端：frontend/ ----------
 # 依赖目录：体积最大，一律不入库，用 npm install 还原
 node_modules/
 
-# 构建产物：vite build 生成，可随时重建（如需部署产物请自行放行本行）
+# 构建产物：npm run build（vite build）生成，可随时重建
+# 【注意】若部署流程需要仓库里带前端产物，请注释掉下两行
 dist/
 dist-ssr/
 
@@ -43,15 +51,15 @@ dist-ssr/
 .vite/
 *.tsbuildinfo
 
-# 锁文件与包管理器状态：
-#   项目实际使用 npm（frontend/package-lock.json 已入库并保留，
-#   它是可复现安装的推荐锁文件）。
-#   下面两个 pnpm 文件是误用 pnpm 时自动生成的，不参与构建，故排除。
+# 包管理器锁文件与状态：
+#   项目实际使用 npm，frontend/package-lock.json 已入库并保留。
+#   下面两个 pnpm 文件是误用 pnpm 时生成的，不参与构建，故排除。
+#   若日后统一改用 pnpm，请改为忽略 package-lock.json 并保留 pnpm-lock.yaml。
 frontend/pnpm-lock.yaml
 frontend/pnpm-workspace.yaml
 
-# ---------- 后端（server/，Maven）----------
-# 编译产物
+# ---------- 后端：server/（Spring Boot + Maven）----------
+# Maven 编译产物（server/target/）
 target/
 !.mvn/wrapper/maven-wrapper.jar
 
@@ -60,13 +68,15 @@ logs/
 *.log.gz
 *.log.*
 
-# ---------- 证书与密钥（如后续添加，请勿入库）----------
+# ---------- 证书与密钥 ----------
 *.pem
 *.key
 *.p12
 *.jks
 
-# ---------- 本地环境变量（如后续添加真实密钥，请自行放行）----------
-# 注意：当前 frontend/.env.development 与 .env.production 只包含
-# VITE_API_BASE_URL（本地地址/内网地址），前端需要它们才能运行，
-# 因此保持入库。若日后填入真实密钥，请改为忽略 .env* 并保留 .env.example。
+# ---------- 环境变量 ----------
+# 现状：frontend/.env.development 与 .env.production 只包含
+# VITE_API_BASE_URL（本地/内网地址），前端运行需要，因此保持入库。
+# 若日后填入真实密钥或生产域名，请改为忽略 .env* 并保留 .env.example。
+.env
+.env.*.local
