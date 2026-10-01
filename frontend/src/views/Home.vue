@@ -7,21 +7,14 @@
       </div>
     </div>
 
-    <div id="button-wrapper">
-      <setting-button />
-    </div>
-
-    <div id="music-wrapper">
-      <music-player />
-    </div>
+    <!-- 设置按钮与音乐按钮已上移到 DefaultLayout，
+         这样它们固定悬浮、不跟着页面左右滑动，只做淡入淡出 -->
   </section>
 </template>
 
 <script setup>
 import { ref } from 'vue'
 import { getSaying } from '@/api/say-api'
-import settingButton from '@/components/button/SettingButton.vue'
-import musicPlayer from '@/components/music-player/music-player.vue'
 
 const saying = ref({
   saying: '今天是明天的昨天',
@@ -93,12 +86,5 @@ fetchSaying(randomId.value)
 
   #say:active {
     transform: scale(0.9);
-  }
-
-  #button-wrapper {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 999;
   }
 </style>

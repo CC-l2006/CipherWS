@@ -17,3 +17,86 @@ body {
 *::after {
   box-sizing: border-box;
 }
+
+/* ===== 页面左右滑动切换（配合 DefaultLayout 的 <transition>） =====
+   方向约定：
+     slide-left   去更深的页面（点「链接」）：新页面从右侧进，旧页面向左出
+     slide-right  回更浅的页面（点「首页」）：新页面从左侧进，旧页面向右出 */
+
+.slide-left-enter-active,
+.slide-right-enter-active,
+.slide-left-leave-active,
+.slide-right-leave-active {
+  transition: transform 0.4s ease, opacity 0.4s ease;
+  will-change: transform;
+}
+
+/* 离场页面脱离文档流，否则两个页面会上下互相挤压 */
+.slide-left-leave-active,
+.slide-right-leave-active {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+
+/* 进场页面盖在离场页面之上，视觉上更像"推进去" */
+.slide-left-enter-active,
+.slide-right-enter-active {
+  position: relative;
+  z-index: 1;
+}
+
+/* 向左滑动 */
+.slide-left-enter-from {
+  transform: translateX(100%);
+  opacity: 0.5;
+}
+.slide-left-leave-to {
+  transform: translateX(-100%);
+  opacity: 0.5;
+}
+
+/* 向右滑动 */
+.slide-right-enter-from {
+  transform: translateX(-100%);
+  opacity: 0.5;
+}
+.slide-right-leave-to {
+  transform: translateX(100%);
+  opacity: 0.5;
+}
+
+/* 动画结束回到常态位置 */
+.slide-left-enter-to,
+.slide-right-enter-to,
+.slide-left-leave-from,
+.slide-right-leave-from {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+/* 尊重"减少动态效果"偏好：直接切换，不做位移 */
+@media (prefers-reduced-motion: reduce) {
+  .slide-left-enter-active,
+  .slide-right-enter-active,
+  .slide-left-leave-active,
+  .slide-right-leave-active {
+    transition: none;
+  }
+}
+
+/* ===== 悬浮控件淡入淡出 =====
+   设置按钮 / 音乐按钮固定悬浮，不能跟着页面左右滑动。
+   它们放在 DefaultLayout 里（.layout-body 之外），所以天然不参与滑动位移；
+   这里只给它们加一层淡入淡出，让出现和消失更柔和。 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.4s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+

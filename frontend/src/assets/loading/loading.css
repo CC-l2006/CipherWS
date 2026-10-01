@@ -12,6 +12,12 @@
     align-items: center;
     justify-content: center;
     transition: opacity 0.8s ease;
+
+    /* 关键：遮罩层永远不参与鼠标命中。
+       本层只负责"看"，不该吃掉点击——一旦 JS 出错或动画事件丢失导致遮罩
+       没能淡出，也不会把整个页面的按钮全部变成点不动。
+       （子元素 SVG 会从父级继承 pointer-events: none） */
+    pointer-events: none;
 }
 
 #lottie-container svg {

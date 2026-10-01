@@ -16,13 +16,15 @@ export const ROUTES = [
         path: '',
         name: 'home',
         component: () => import('@/views/Home.vue'),
-        meta: { title: '首页' }
+        // depth 越大表示越"深"。DefaultLayout 用它决定切换动画方向：
+        // 去更深的页面（首页 -> 链接）向左滑动，返回时向右滑动。
+        meta: { title: '首页', depth: 0 }
       },
       {
         path: 'link',
         name: 'link',
         component: () => import('@/views/Link.vue'),
-        meta: { title: '链接' }
+        meta: { title: '链接', depth: 1 }
       }
     ]
   }

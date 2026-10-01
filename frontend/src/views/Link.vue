@@ -14,11 +14,7 @@ import LinkIcon from '@/components/button/LinkIcon.vue'
     --icon-size: 66px;
     /* 单个图标占的格子宽度 */
     --icon-cell: 84px;
-    /* 列数上限：PC 端一行最多 10 个，多出来的换到下一行 */
     --max-cols: 10;
-    /* 视觉微调：在居中基础上整体上移 20px（改这个值即可调整偏移量） */
-    position: relative;
-    top: -20px;
     flex: 1;
     width: 100%;
     max-width: calc(
