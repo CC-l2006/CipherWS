@@ -1,0 +1,72 @@
+# ===== CipherWS 根 .gitignore =====
+# 说明：本仓库为前后端同仓结构
+#   frontend/  前端（Vue3 + Vite）
+#   server/    后端（Spring Boot / Maven）
+# 判断原则：能由 package.json / pom.xml 重新生成的产物一律不进仓库。
+
+# ---------- 通用 ----------
+.DS_Store
+Thumbs.db
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.local
+
+# 临时/缓存
+.cache/
+.temp/
+.tmp/
+*.tmp
+
+# ---------- IDE / 编辑器 ----------
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# ---------- 前端（frontend/）----------
+# 依赖目录：体积最大，一律不入库，用 npm install 还原
+node_modules/
+
+# 构建产物：vite build 生成，可随时重建（如需部署产物请自行放行本行）
+dist/
+dist-ssr/
+
+# Vite 缓存
+.vite/
+*.tsbuildinfo
+
+# 锁文件与包管理器状态：
+#   项目实际使用 npm（frontend/package-lock.json 已入库并保留，
+#   它是可复现安装的推荐锁文件）。
+#   下面两个 pnpm 文件是误用 pnpm 时自动生成的，不参与构建，故排除。
+frontend/pnpm-lock.yaml
+frontend/pnpm-workspace.yaml
+
+# ---------- 后端（server/，Maven）----------
+# 编译产物
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# 日志
+logs/
+*.log.gz
+*.log.*
+
+# ---------- 证书与密钥（如后续添加，请勿入库）----------
+*.pem
+*.key
+*.p12
+*.jks
+
+# ---------- 本地环境变量（如后续添加真实密钥，请自行放行）----------
+# 注意：当前 frontend/.env.development 与 .env.production 只包含
+# VITE_API_BASE_URL（本地地址/内网地址），前端需要它们才能运行，
+# 因此保持入库。若日后填入真实密钥，请改为忽略 .env* 并保留 .env.example。
