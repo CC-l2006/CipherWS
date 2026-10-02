@@ -1,7 +1,7 @@
 <template>
-  <div id="music-box" :class="{ 'is-playing': isPlaying, 'is-fullscreen': isFullscreen }">
-    <!-- cover (mini mode) -->
-    <div class="cover-wrapper" v-show="!isFullscreen">
+  <div id="music-box" :class="{ 'is-playing': isPlaying }">
+    <!-- 封面 -->
+    <div class="cover-wrapper">
       <div class="cover" :class="{ spinning: isPlaying }">
         <img v-if="coverUrl" :src="coverUrl" alt="cover" @error="coverUrl = ''" />
         <div v-else class="cover-placeholder"><span>&#x1f3b5;</span></div>
@@ -11,59 +11,42 @@
       </div>
     </div>
 
-    <!-- fullscreen content -->
-    <template v-if="isFullscreen">
-      <div class="fs-top">
-        <div class="fs-cover" :class="{ spinning: isPlaying }">
-          <img v-if="coverUrl" :src="coverUrl" alt="cover" />
-          <div v-else class="cover-placeholder-lg">&#x1f3b5;</div>
-        </div>
-        <div class="fs-info">
-          <div class="fs-title">{{ title || '未知歌曲' }}</div>
-          <div class="fs-artist">{{ artist || '未知歌手' }}</div>
-        </div>
-      </div>
-      <div class="lyrics-panel" ref="lyricsPanel">
-        <div v-if="parsedLyrics.length === 0" class="lyrics-empty">暂无歌词</div>
-        <div v-for="(line, idx) in parsedLyrics" :key="idx"
-          class="lyrics-line" :class="{ active: idx === currentLyricIndex }">
-          {{ line.text }}
-        </div>
-      </div>
-    </template>
-
-    <!-- expanded info -->
-    <template v-else>
-      <div class="music-info">
-        <div class="music-title">{{ title || '未知歌曲' }}</div>
-        <div class="music-artist">{{ artist || '未知歌手' }}</div>
-      </div>
-    </template>
+    <!-- 曲目信息：仅在悬停展开成胶囊时显示 -->
+    <div class="music-info">
+      <div class="music-title">{{ title || '未知歌曲' }}</div>
+      <div class="music-artist">{{ artist || '未知歌手' }}</div>
+    </div>
 
     <!-- progress bar -->
     <div class="progress-bar-wrapper" @click="handleProgressClick">
       <div class="progress-bar">
         <div class="progress-fill" :style="{ width: progressPercent + '%' }"></div>
-        <div class="progress-dot" :style="{ left: progressPercent + '%' }"></div>
+        <!-- 0% 时不显示圆点，否则进度条没数据也会有个点悬在中间 -->
+        <div
+          v-if="progressPercent > 0"
+          class="progress-dot"
+          :style="{ left: progressPercent + '%' }"
+        ></div>
       </div>
       <div class="progress-time">
         <span>{{ formatTime(currentTime) }}</span>
+        <span>/</span>
         <span>{{ formatTime(duration) }}</span>
       </div>
     </div>
 
     <!-- controls -->
-    <div class="music-controls" :class="{ 'fs-controls': isFullscreen }">
+    <div class="music-controls">
       <button class="ctrl-btn" @click="handlePrev" title="上一首">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
           <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
         </svg>
       </button>
       <button class="ctrl-btn play-btn" @click="togglePlay" :title="isPlaying ? '暂停' : '播放'">
-        <svg v-if="!isPlaying" viewBox="0 0 24 24" :width="isFullscreen ? 28 : 20" :height="isFullscreen ? 28 : 20" fill="currentColor">
+        <svg v-if="!isPlaying" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
           <path d="M8 5v14l11-7z"/>
         </svg>
-        <svg v-else viewBox="0 0 24 24" :width="isFullscreen ? 28 : 20" :height="isFullscreen ? 28 : 20" fill="currentColor">
+        <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
           <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
         </svg>
       </button>
@@ -78,42 +61,21 @@
           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
         </svg>
       </button>
-      <button v-if="isFullscreen" class="ctrl-btn fs-close-btn" @click="isFullscreen = false" title="收起">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
-          <polyline points="6 9 12 15 18 9"/>
-        </svg>
-      </button>
     </div>
-
-    <!-- expand button -->
-    <button v-if="!isFullscreen" class="expand-btn" @click="isFullscreen = true" title="全屏播放">
-      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-        <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
-        <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
-      </svg>
-    </button>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
 
-// ⚠️ 原文件只有 template，所有绑定都是未定义的（渲染时报错）。
-// 这里补齐最小可用逻辑：音频源尚未配置，播放/暂停只切换 UI 状态。
+// 音频源尚未配置，播放/暂停只切换 UI 状态。
 const isPlaying = ref(false)
-const isFullscreen = ref(false)
 const isLiked = ref(false)
 const coverUrl = ref('')
 const title = ref('')
 const artist = ref('')
 const currentTime = ref(0)
 const duration = ref(0)
-const lyricsPanel = ref(null)
-const currentLyricIndex = ref(0)
-
-// 歌词格式：每行 `[mm:ss]歌词内容`
-const rawLyrics = ref('')
-const parsedLyrics = ref([])
 
 function formatTime (seconds) {
   const total = Math.max(0, Math.floor(Number(seconds) || 0))
@@ -149,21 +111,20 @@ function handleProgressClick () {
     height: 100%;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     padding: 6px;
     box-sizing: border-box;
     color: #ffffff;
-    background: rgba(20, 20, 24, 0.6);
-    backdrop-filter: blur(8px);
+    /* 外圈颜色 */
+    background: #1a7891;
+    /* 继承外层 #music-wrapper 的圆角：外层负责定义形状（圆形 / 悬停展开的胶囊），
+       内层填满它并跟随。写死具体值会导致两层圆角不一致，内层会把外层的圆角盖住。
+       overflow:hidden 让背景被裁成与外层完全相同的形状。 */
+    border-radius: inherit;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
     user-select: none;
-  }
-
-  #music-box.is-fullscreen {
-    flex-direction: column;
-    justify-content: center;
-    padding: 20px;
-    gap: 14px;
-    background: rgba(12, 12, 16, 0.88);
   }
 
   /* ===== 封面 ===== */
@@ -173,25 +134,23 @@ function handleProgressClick () {
   }
 
   .cover {
-    width: 44px;
-    height: 44px;
+    width: 42px;
+    height: 42px;
     border-radius: 50%;
     overflow: hidden;
-    background: rgba(255, 255, 255, 0.12);
+    background: rgba(255, 255, 255, 0.18);
     display: flex;
     align-items: center;
     justify-content: center;
   }
 
-  .cover img,
-  .fs-cover img {
+  .cover img {
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
 
-  .cover.spinning,
-  .fs-cover.spinning {
+  .cover.spinning {
     animation: music-spin 12s linear infinite;
   }
 
@@ -231,74 +190,62 @@ function handleProgressClick () {
   }
 
   /* ===== 曲目信息 ===== */
-  .music-info,
-  .fs-info {
+  /* 默认（圆形悬浮球）状态下隐藏文字，否则内容会溢出圆球 */
+  .music-info {
+    display: none;
+  }
+
+  /* 悬停展开成胶囊后才显示曲目信息 */
+  #music-wrapper:hover .music-info {
     display: flex;
+  }
+
+  .music-info {
     flex-direction: column;
-    gap: 2px;
+    gap: 0;
     min-width: 0;
     flex: 1;
   }
 
-  .music-title,
-  .fs-title {
-    font-size: 13px;
+  .music-title {
+    font-size: 12px;
     color: #ffffff;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .music-artist,
-  .fs-artist {
-    font-size: 11px;
-    color: #b4b4b4;
+  .music-artist {
+    font-size: 10px;
+    /* 奶米黄，与外圈 #1A7891 形成对比且不刺眼 */
+    color: #f2ebc7;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  .fs-title { font-size: 16px; }
-  .fs-artist { font-size: 12px; }
-
-  .fs-top {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    width: 100%;
-  }
-
-  .fs-cover {
-    width: 64px;
-    height: 64px;
-    flex: none;
-    border-radius: 50%;
-    overflow: hidden;
-    background: rgba(255, 255, 255, 0.12);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .cover-placeholder-lg {
-    font-size: 26px;
-    line-height: 1;
-  }
-
   /* ===== 进度条 ===== */
   .progress-bar-wrapper {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 4px;
     cursor: pointer;
   }
 
+  /* 默认（56px 圆形悬浮球）状态只保留封面圆盘：
+     胶囊内容总宽约 174px，塞进 56px 只会被裁出一条尾巴，必须显式隐藏。 */
+  #music-wrapper:not(:hover) .progress-bar-wrapper {
+    display: none;
+  }
+
   .progress-bar {
     position: relative;
-    height: 3px;
+    height: 4px;
     border-radius: 999px;
-    background: rgba(255, 255, 255, 0.2);
+    /* 与外圈同色系的深色轨道，保证在 #1A7891 上有对比 */
+    background: rgba(0, 0, 0, 0.28);
   }
 
   .progress-fill {
@@ -307,7 +254,8 @@ function handleProgressClick () {
     top: 0;
     height: 100%;
     border-radius: 999px;
-    background: rgb(129, 110, 216);
+    /* 奶米黄进度，替代原来的紫色以匹配新配色 */
+    background: #f2ebc7;
   }
 
   .progress-dot {
@@ -323,20 +271,26 @@ function handleProgressClick () {
 
   .progress-time {
     display: flex;
-    justify-content: space-between;
-    font-size: 10px;
-    color: #b4b4b4;
+    align-items: center;
+    gap: 3px;
+    font-size: 9px;
+    line-height: 1;
+    color: #d6f0f5;
+    white-space: nowrap;
+  }
+
+  /* 默认（圆形悬浮球）状态隐藏时间：高度只有 56px，必须精简内容。
+     注意悬停时类挂在 #music-wrapper 上，所以用 :hover 匹配父级。 */
+  #music-wrapper:not(:hover) .progress-time {
+    display: none;
   }
 
   /* ===== 控制按钮 ===== */
   .music-controls {
     display: flex;
     align-items: center;
-    gap: 6px;
-  }
-
-  .music-controls.fs-controls {
-    justify-content: center;
+    gap: 4px;
+    flex: none;
   }
 
   .ctrl-btn {
@@ -344,59 +298,38 @@ function handleProgressClick () {
     align-items: center;
     justify-content: center;
     padding: 4px;
-    color: #d9d9d9;
+    color: #e8f6f9;
     background: transparent;
     border: none;
     border-radius: 50%;
     cursor: pointer;
-    transition: color 0.2s ease;
+    transition: color 0.2s ease, background 0.2s ease;
   }
 
   .ctrl-btn:hover {
     color: #ffffff;
+    background: rgba(255, 255, 255, 0.16);
   }
 
+  /* 收藏选中态：用奶米黄，与原紫色一起替换为新配色 */
   .ctrl-btn.liked {
-    color: rgb(129, 110, 216);
+    color: #f2ebc7;
   }
 
-  .expand-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px;
-    color: #b4b4b4;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-  }
+  /* ===== 小屏：胶囊展开宽度收窄，进一步精简内容 ===== */
+  @media (max-width: 600px) {
+    .cover {
+      width: 34px;
+      height: 34px;
+    }
 
-  .expand-btn:hover {
-    color: #ffffff;
-  }
+    .music-controls {
+      gap: 2px;
+    }
 
-  /* ===== 歌词面板（全屏） ===== */
-  .lyrics-panel {
-    width: 100%;
-    max-height: 140px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    text-align: center;
-  }
-
-  .lyrics-line {
-    font-size: 12px;
-    color: #8a8a8a;
-  }
-
-  .lyrics-line.active {
-    color: #ffffff;
-  }
-
-  .lyrics-empty {
-    font-size: 12px;
-    color: #8a8a8a;
+    /* 优先丢掉次要文字，保证控件不被挤压 */
+    .music-info {
+      display: none !important;
+    }
   }
 </style>

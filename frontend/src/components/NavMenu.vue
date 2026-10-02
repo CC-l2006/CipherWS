@@ -30,6 +30,8 @@ const items = [
 
 <style scoped>
   .nav-menu {
+    --nav-active-bg: #f2ebc7;   /* 选中态底色：奶米黄（云朵色） */
+    --nav-active-text: #145c70; /* 选中态文字：深蓝，保证可读性 */
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
@@ -54,9 +56,25 @@ const items = [
     background: rgba(255, 255, 255, 0.16);
   }
 
+  /* 选中态：奶米黄底 + 深蓝文字。
+     两者对比度约 6:1，高于 WCAG AA 对正文要求的 4.5:1。
+     边框用同色系半透明深蓝，避免深色背景下奶米黄块边缘发虚。 */
   .nav-item.active {
-    color: #ffffff;
-    border-color: rgba(255, 255, 255, 0.6);
-    background: rgba(129, 110, 216, 0.65);
+    color: var(--nav-active-text);
+    background: var(--nav-active-bg);
+    border-color: rgba(20, 92, 112, 0.45);
+  }
+
+  /* 选中态悬停：保持同一配色，只轻微提亮，避免变回白字导致看不清 */
+  .nav-item.active:hover {
+    color: var(--nav-active-text);
+    background: #f7f2d9;
+    border-color: rgba(20, 92, 112, 0.65);
+  }
+
+  /* 键盘可达性：Tab 聚焦时给出清晰提示 */
+  .nav-item:focus-visible {
+    outline: 2px solid var(--nav-active-bg);
+    outline-offset: 2px;
   }
 </style>
