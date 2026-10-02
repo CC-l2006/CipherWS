@@ -2,6 +2,7 @@
   <div class="icon-grid">
     <LinkIcon title="毕业设计" bg-color="#fb7299" :size="66" />
     <LinkIcon title="关于我" bg-color="#4e6ef2" :size="66" img-url="/tab-icon/icon.jpg" />
+    <LinkIcon title="McServer" bg-color="#4e6ef2" :size="66" to="http://frp-dog.com:51921" />
   </div>
 </template>
 
