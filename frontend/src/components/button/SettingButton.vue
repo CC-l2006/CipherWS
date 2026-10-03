@@ -77,14 +77,17 @@ const iconStyle = computed(() => ({
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 40px;
-    height: 40px;
+    /* 44px 满足移动端触控目标建议值（图标本身仍是 26px） */
+    width: 44px;
+    height: 44px;
     padding: 0;
     /* 无背景：按钮完全透明，图形只由线条构成 */
     background: none;
     border: none;
     color: var(--icon-color);
     cursor: pointer;
+    /* 触屏上更容易命中，并抑制双击缩放 */
+    touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
   }
 

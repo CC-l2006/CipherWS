@@ -77,4 +77,24 @@ const items = [
     outline: 2px solid var(--nav-active-bg);
     outline-offset: 2px;
   }
+
+  /* ===== 手机竖屏：触控目标放大到 >= 44px 高 =====
+     原来高 33px，低于移动端 44px 的建议值，手指容易点偏。 */
+  @media (max-width: 600px) {
+    .nav-menu {
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0 20px;
+      font-size: 15px;
+      /* 触屏上更容易命中，并抑制双击缩放 */
+      touch-action: manipulation;
+    }
+  }
 </style>

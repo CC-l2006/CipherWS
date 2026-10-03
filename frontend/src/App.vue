@@ -6,8 +6,18 @@
 </script>
 
 <style>
+  html,
+  body {
+    /* 移动端兜底：禁止横向滚动。
+       起因是顶部卡片在 375px 宽下比屏幕宽（实测 423px），会把文档撑宽。 */
+    overflow-x: hidden;
+  }
+
   #app {
     min-height: 100vh;
+    /* 移动浏览器地址栏伸缩时 100vh 会跳变，dvh 能跟随可视高度；
+       不支持的浏览器会忽略下面这行，继续用 100vh。 */
+    min-height: 100dvh;
     background-image: url('@/assets/bac/bing.jpg');
     background-size: cover;
     background-position: center;
@@ -44,9 +54,11 @@
        会跟随这里的外层尺寸和圆角，无需覆盖。 */
   }
 
-  /* 悬停展开：胶囊形，高度保持与默认悬浮球一致。
-     没有全屏形态了，所以只有「圆形」和「胶囊」两种状态，圆角恒为 999px。 */
-  #music-wrapper:hover {
+  /* 展开态：胶囊形，高度保持与默认悬浮球一致。
+     没有全屏形态了，所以只有「圆形」和「胶囊」两种状态，圆角恒为 999px。
+     触屏没有 hover，因此除 :hover 外还支持 .is-open（由 JS 点击切换）。 */
+  #music-wrapper:hover,
+  #music-wrapper.is-open {
     width: 348px;
     height: 56px;
     border-radius: 999px;
@@ -54,18 +66,47 @@
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.08);
   }
 
-  /* 响应式调整 - 小屏幕下缩小间距 */
+  /* ===== 小屏适配 ===== */
   @media (max-width: 600px) {
     #music-wrapper {
       bottom: 16px;
       left: 16px;
       width: 48px;
       height: 48px;
+      /* 触屏上更容易命中，并避免浏览器把点击判定成滚动 */
+      touch-action: manipulation;
     }
 
-    #music-wrapper:hover {
-      width: 300px;
+    /* 展开宽度按屏宽收敛，不超出手机屏幕 */
+    #music-wrapper:hover,
+    #music-wrapper.is-open {
+      width: min(320px, calc(100vw - 32px));
       height: 48px;
     }
+
+    /* 收起按钮只在触屏展开时出现（手机没有"移开鼠标"这个动作） */
+    .music-collapse {
+      display: flex;
+    }
+  }
+
+  /* 收起按钮：桌面端用不到（移开鼠标即可收起），默认隐藏 */
+  .music-collapse {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: #e8f6f9;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  .music-collapse:active {
+    background: rgba(255, 255, 255, 0.16);
   }
 </style>

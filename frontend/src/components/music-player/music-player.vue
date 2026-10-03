@@ -1,5 +1,5 @@
 <template>
-  <div id="music-box" :class="{ 'is-playing': isPlaying }">
+  <div id="music-box" :class="{ 'is-playing': isPlaying, 'is-open': isOpen }">
     <!-- 封面 -->
     <div class="cover-wrapper">
       <div class="cover" :class="{ spinning: isPlaying }">
@@ -11,7 +11,7 @@
       </div>
     </div>
 
-    <!-- 曲目信息：仅在悬停展开成胶囊时显示 -->
+    <!-- 曲目信息：仅在展开成胶囊时显示 -->
     <div class="music-info">
       <div class="music-title">{{ title || '未知歌曲' }}</div>
       <div class="music-artist">{{ artist || '未知歌手' }}</div>
@@ -37,36 +37,64 @@
 
     <!-- controls -->
     <div class="music-controls">
-      <button class="ctrl-btn" @click="handlePrev" title="上一首">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <button class="ctrl-btn" @click="handlePrev" title="上一首" aria-label="上一首">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
           <path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/>
         </svg>
       </button>
-      <button class="ctrl-btn play-btn" @click="togglePlay" :title="isPlaying ? '暂停' : '播放'">
-        <svg v-if="!isPlaying" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+      <button
+        class="ctrl-btn play-btn"
+        @click="togglePlay"
+        :title="isPlaying ? '暂停' : '播放'"
+        :aria-label="isPlaying ? '暂停' : '播放'"
+      >
+        <svg v-if="!isPlaying" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
           <path d="M8 5v14l11-7z"/>
         </svg>
-        <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+        <svg v-else viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true">
           <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
         </svg>
       </button>
-      <button class="ctrl-btn" @click="handleNext" title="下一首">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+      <button class="ctrl-btn" @click="handleNext" title="下一首" aria-label="下一首">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
           <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/>
         </svg>
       </button>
-      <button class="ctrl-btn like-btn" @click="isLiked = !isLiked" :class="{ liked: isLiked }" title="收藏">
-        <svg viewBox="0 0 24 24" width="14" height="14"
+      <button
+        class="ctrl-btn like-btn"
+        @click="isLiked = !isLiked"
+        :class="{ liked: isLiked }"
+        title="收藏"
+        aria-label="收藏"
+      >
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"
           :fill="isLiked ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
           <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
         </svg>
       </button>
     </div>
+
+    <!--
+      收起按钮：触屏没有"移开鼠标"这个动作，展开后必须给一个明确的收起入口。
+      桌面端由 CSS 隐藏（移开鼠标即收起）。
+    -->
+    <button class="ctrl-btn music-collapse" @click="collapse" title="收起" aria-label="收起">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <polyline points="6 9 12 15 18 9"/>
+      </svg>
+    </button>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+
+const props = defineProps({
+  /** 由父组件控制的展开状态（触屏点击展开用） */
+  expanded: { type: Boolean, default: false }
+})
+
+const emit = defineEmits(['collapse'])
 
 // 音频源尚未配置，播放/暂停只切换 UI 状态。
 const isPlaying = ref(false)
@@ -76,6 +104,13 @@ const title = ref('')
 const artist = ref('')
 const currentTime = ref(0)
 const duration = ref(0)
+
+// 展开时隐藏"曲目信息/进度条/收起按钮"以外的判断都基于这个值
+const isOpen = computed(() => props.expanded)
+
+function collapse () {
+  emit('collapse')
+}
 
 function formatTime (seconds) {
   const total = Math.max(0, Math.floor(Number(seconds) || 0))
@@ -190,13 +225,14 @@ function handleProgressClick () {
   }
 
   /* ===== 曲目信息 ===== */
-  /* 默认（圆形悬浮球）状态下隐藏文字，否则内容会溢出圆球 */
+  /* 默认（圆形悬浮球）状态下隐藏文字，否则内容会溢出圆球。
+     展开条件同时接受父级 :hover（桌面）与组件自身 .is-open（触屏点击）。 */
   .music-info {
     display: none;
   }
 
-  /* 悬停展开成胶囊后才显示曲目信息 */
-  #music-wrapper:hover .music-info {
+  #music-wrapper:hover .music-info,
+  #music-box.is-open .music-info {
     display: flex;
   }
 
@@ -234,9 +270,9 @@ function handleProgressClick () {
     cursor: pointer;
   }
 
-  /* 默认（56px 圆形悬浮球）状态只保留封面圆盘：
+  /* 默认（圆形悬浮球）状态只保留封面圆盘：
      胶囊内容总宽约 174px，塞进 56px 只会被裁出一条尾巴，必须显式隐藏。 */
-  #music-wrapper:not(:hover) .progress-bar-wrapper {
+  #music-wrapper:not(:hover):not(.is-open) .progress-bar-wrapper {
     display: none;
   }
 
@@ -280,8 +316,8 @@ function handleProgressClick () {
   }
 
   /* 默认（圆形悬浮球）状态隐藏时间：高度只有 56px，必须精简内容。
-     注意悬停时类挂在 #music-wrapper 上，所以用 :hover 匹配父级。 */
-  #music-wrapper:not(:hover) .progress-time {
+     触屏用 .is-open（类挂在 #music-box 上）判断，因此两个条件都要覆盖。 */
+  #music-wrapper:not(:hover):not(.is-open) .progress-time {
     display: none;
   }
 
@@ -297,12 +333,16 @@ function handleProgressClick () {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 4px;
+    /* 触控目标：移动端建议 >= 44px。图标仍保持原视觉大小，
+       靠 padding 撑大热区，再用负外边距抵消，避免撑大整个胶囊。 */
+    padding: 12px;
+    margin: -8px;
     color: #e8f6f9;
     background: transparent;
     border: none;
     border-radius: 50%;
     cursor: pointer;
+    touch-action: manipulation;
     transition: color 0.2s ease, background 0.2s ease;
   }
 
@@ -330,6 +370,12 @@ function handleProgressClick () {
     /* 优先丢掉次要文字，保证控件不被挤压 */
     .music-info {
       display: none !important;
+    }
+
+    /* 小屏胶囊里进一步放大热区 */
+    .ctrl-btn {
+      padding: 14px;
+      margin: -10px;
     }
   }
 </style>

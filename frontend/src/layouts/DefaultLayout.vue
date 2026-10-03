@@ -24,8 +24,18 @@
     </transition>
 
     <transition name="fade" appear>
-      <div id="music-wrapper">
-        <music-player />
+      <!--
+        触屏没有 hover，只靠 CSS :hover 展开会导致手机上音乐控件完全点不到。
+        因此这里用 JS 维护展开状态：点击它展开，再点空白处收起。
+        （@click.self 确保点内部控件不会误收起）
+        桌面端原有的 hover 展开仍然保留，两种方式并存互不冲突。
+      -->
+      <div
+        id="music-wrapper"
+        :class="{ 'is-open': musicOpen }"
+        @click.self="musicOpen = !musicOpen"
+      >
+        <music-player :expanded="musicOpen" @collapse="musicOpen = false" />
       </div>
     </transition>
   </div>
@@ -45,6 +55,9 @@ const route = useRoute()
 // 默认向左（点「链接」的方向）
 const transitionName = ref('slide-left')
 
+// 音乐播放器展开状态（触屏用，桌面端仍可用 hover）
+const musicOpen = ref(false)
+
 /**
  * 根据目标路由的深度决定滑动方向：
  *   去更深的页面（首页 -> 链接）向左滑动
@@ -58,6 +71,12 @@ watch(
     transitionName.value = depth > prevDepth ? 'slide-left' : 'slide-right'
   }
 )
+
+// 切页时收起音乐播放器，避免展开态跨页残留
+watch(
+  () => route.fullPath,
+  () => { musicOpen.value = false }
+)
 </script>
 
 <style scoped>
@@ -65,6 +84,8 @@ watch(
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+    /* 移动浏览器地址栏伸缩时 100vh 会跳变，dvh 跟随可视高度（不支持的浏览器忽略此行） */
+    min-height: 100dvh;
   }
 
   .layout-body {
@@ -82,5 +103,14 @@ watch(
     top: 20px;
     right: 20px;
     z-index: 999;
+  }
+
+  /* ===== 手机竖屏：避让刘海/圆角，并给内容留出安全区 ===== */
+  @media (max-width: 600px) {
+    #button-wrapper {
+      /* env() 在无安全区的设备上取回退值，所以桌面/普通机型不会偏移 */
+      top: calc(12px + env(safe-area-inset-top, 0px));
+      right: calc(12px + env(safe-area-inset-right, 0px));
+    }
   }
 </style>
