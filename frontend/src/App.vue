@@ -55,9 +55,8 @@
   }
 
   /* 展开态：胶囊形，高度保持与默认悬浮球一致。
-     没有全屏形态了，所以只有「圆形」和「胶囊」两种状态，圆角恒为 999px。
-     触屏没有 hover，因此除 :hover 外还支持 .is-open（由 JS 点击切换）。 */
-  #music-wrapper:hover,
+     只由点击驱动（.is-open，由 DefaultLayout 切换），不再用 :hover 触发：
+     hover 在触屏上不成立，桌面端也容易误展开。 */
   #music-wrapper.is-open {
     width: 348px;
     height: 56px;
@@ -78,7 +77,6 @@
     }
 
     /* 展开宽度按屏宽收敛，不超出手机屏幕 */
-    #music-wrapper:hover,
     #music-wrapper.is-open {
       width: min(320px, calc(100vw - 32px));
       height: 48px;

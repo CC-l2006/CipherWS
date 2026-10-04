@@ -25,15 +25,16 @@
 
     <transition name="fade" appear>
       <!--
-        触屏没有 hover，只靠 CSS :hover 展开会导致手机上音乐控件完全点不到。
-        因此这里用 JS 维护展开状态：点击悬浮球展开。
-        （@click.self 确保点内部控件不会误触）
-        桌面端原有的 hover 展开仍然保留，两种方式并存互不冲突。
+        展开/收起由点击驱动（不再用 :hover）。
+        这里用"按目标判断"而不是 @click.self：
+        因为 .music-root 会填满 #music-wrapper，e.target 永远不可能是 wrapper 本身，
+        @click.self 会完全失效（实测点击无法展开）。
+        点控件或列表时直接返回，不切换展开态。
       -->
       <div
         id="music-wrapper"
         :class="{ 'is-open': musicOpen }"
-        @click.self="musicOpen = !musicOpen"
+        @click="handleMusicClick"
       >
         <music-player :expanded="musicOpen" />
       </div>
@@ -55,8 +56,19 @@ const route = useRoute()
 // 默认向左（点「链接」的方向）
 const transitionName = ref('slide-left')
 
-// 音乐播放器展开状态（触屏用，桌面端仍可用 hover）
+// 音乐播放器展开状态（点击展开 / 收起）
 const musicOpen = ref(false)
+
+/**
+ * 点击悬浮球展开、再点空白处收起。
+ * 点内部控件（播放/切歌/收藏/进度条/列表按钮）时不切换，避免误触。
+ */
+function handleMusicClick (event) {
+  const el = event.target
+  // 命中间隔区（封面、留白）才切换展开态
+  if (el.closest && el.closest('.ctrl-btn, .progress-bar-wrapper, .playlist')) return
+  musicOpen.value = !musicOpen.value
+}
 
 /**
  * 根据目标路由的深度决定滑动方向：
