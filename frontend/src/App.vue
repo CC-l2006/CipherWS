@@ -83,30 +83,5 @@
       width: min(320px, calc(100vw - 32px));
       height: 48px;
     }
-
-    /* 收起按钮只在触屏展开时出现（手机没有"移开鼠标"这个动作） */
-    .music-collapse {
-      display: flex;
-    }
-  }
-
-  /* 收起按钮：桌面端用不到（移开鼠标即可收起），默认隐藏 */
-  .music-collapse {
-    display: none;
-    align-items: center;
-    justify-content: center;
-    flex: none;
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    color: #e8f6f9;
-    background: transparent;
-    border: none;
-    border-radius: 50%;
-    cursor: pointer;
-  }
-
-  .music-collapse:active {
-    background: rgba(255, 255, 255, 0.16);
   }
 </style>

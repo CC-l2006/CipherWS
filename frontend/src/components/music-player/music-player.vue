@@ -73,16 +73,6 @@
         </svg>
       </button>
     </div>
-
-    <!--
-      收起按钮：触屏没有"移开鼠标"这个动作，展开后必须给一个明确的收起入口。
-      桌面端由 CSS 隐藏（移开鼠标即收起）。
-    -->
-    <button class="ctrl-btn music-collapse" @click="collapse" title="收起" aria-label="收起">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-        <polyline points="6 9 12 15 18 9"/>
-      </svg>
-    </button>
   </div>
 </template>
 
@@ -94,8 +84,6 @@ const props = defineProps({
   expanded: { type: Boolean, default: false }
 })
 
-const emit = defineEmits(['collapse'])
-
 // 音频源尚未配置，播放/暂停只切换 UI 状态。
 const isPlaying = ref(false)
 const isLiked = ref(false)
@@ -105,12 +93,8 @@ const artist = ref('')
 const currentTime = ref(0)
 const duration = ref(0)
 
-// 展开时隐藏"曲目信息/进度条/收起按钮"以外的判断都基于这个值
+// 展开状态由父组件控制
 const isOpen = computed(() => props.expanded)
-
-function collapse () {
-  emit('collapse')
-}
 
 function formatTime (seconds) {
   const total = Math.max(0, Math.floor(Number(seconds) || 0))

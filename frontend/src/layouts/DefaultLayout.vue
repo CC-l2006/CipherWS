@@ -26,8 +26,8 @@
     <transition name="fade" appear>
       <!--
         触屏没有 hover，只靠 CSS :hover 展开会导致手机上音乐控件完全点不到。
-        因此这里用 JS 维护展开状态：点击它展开，再点空白处收起。
-        （@click.self 确保点内部控件不会误收起）
+        因此这里用 JS 维护展开状态：点击悬浮球展开。
+        （@click.self 确保点内部控件不会误触）
         桌面端原有的 hover 展开仍然保留，两种方式并存互不冲突。
       -->
       <div
@@ -35,7 +35,7 @@
         :class="{ 'is-open': musicOpen }"
         @click.self="musicOpen = !musicOpen"
       >
-        <music-player :expanded="musicOpen" @collapse="musicOpen = false" />
+        <music-player :expanded="musicOpen" />
       </div>
     </transition>
   </div>
