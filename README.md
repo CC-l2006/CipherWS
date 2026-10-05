@@ -10,6 +10,7 @@ CipherWS 是一个前后端同仓的个人建站项目：前端为 Vue 3 + Vite 
 CipherWS/
 ├── frontend/          # 前端工程（Vue 3 + Vite 单页应用）
 ├── server/            # 后端工程（Spring Cloud Alibaba 微服务，Maven 多模块）
+├── deploy/            # 本地部署：项目内 JDK/Nacos 与启停脚本
 ├── docker/            # 容器化部署资产（Nacos 镜像与启停脚本）
 ├── docs/              # 项目文档（架构、接口、部署说明等）
 ├── .git/              # Git 版本库
@@ -21,11 +22,17 @@ CipherWS/
 | --- | --- | --- |
 | `frontend/` | 目录 | 前端主站，负责页面渲染与接口调用（构建产物 `dist/`） |
 | `server/` | 目录 | 后端微服务聚合工程（父 POM + 4 个模块） |
+| `deploy/` | 目录 | 本地部署脚本与说明（Windows 原生，不依赖 Docker） |
 | `docker/` | 目录 | Nacos 注册中心 / 配置中心的容器镜像与启停脚本 |
 | `docs/` | 目录 | 项目文档集中存放处 |
 | `.git/` | 目录 | Git 版本库元数据 |
 | `.gitignore` | 文件 | 仓库忽略规则 |
 | `README.md` | 文件 | 项目说明（本文件） |
+
+> 音频资源（`server/cipherws-say-service/.../music/`，约 131 MB）**不入库**，
+> 改为放在仓库外的 `deploy/music/`，由 `deploy/run-services.ps1` 通过
+> `AUDIO_MUSIC_PATH` 注入。详见
+> [server/cipherws-say-service/src/main/resources/music/README.md](server/cipherws-say-service/src/main/resources/music/README.md)。
 
 ## 二、后端模块（server/）
 
@@ -66,10 +73,21 @@ cd ../frontend && npm install && npm run dev
 
 验证：`curl http://127.0.0.1:8080/say/saying?id=1`
 
+> **Windows 本地启动（不依赖 Docker）**：项目提供了 `deploy/` 一键脚本，
+> 用项目内的 JDK 17 与 Nacos 3.3.0-RC 起全套服务，不污染系统环境变量：
+>
+> ```powershell
+> powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\start-nacos.ps1
+> powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\run-services.ps1 -Action start
+> ```
+>
+> 详见 [deploy/README.md](deploy/README.md)。
+
 ## 四、文档索引
 
 | 文档 | 内容 |
 | --- | --- |
+| [deploy/README.md](deploy/README.md) | Windows 本地部署：项目内 JDK/Nacos、启停脚本、鉴权说明 |
 | [docs/微服务架构.md](docs/微服务架构.md) | 后端微服务结构、Nacos、OpenFeign、运行方式 |
 | [docs/Nacos容器部署.md](docs/Nacos容器部署.md) | `docker/` 目录说明与 Nacos 容器部署 |
 | [docs/分层架构.md](docs/分层架构.md) | 自上而下的分层架构设计 |
