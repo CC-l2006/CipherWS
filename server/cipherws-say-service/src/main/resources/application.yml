@@ -1,0 +1,38 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: cipherws-say-service
+  cloud:
+    nacos:
+      # Nacos 服务端地址（单机模式默认 8848）
+      server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      username: nacos
+      password: 1357924680bb
+      discovery:
+        namespace: ${NACOS_NAMESPACE:}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+      config:
+        namespace: ${NACOS_NAMESPACE:}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+        file-extension: yaml
+  config:
+    # Nacos 配置中心：可选导入，缺失也不影响启动
+    import:
+      - optional:nacos:cipherws-say-service.yaml
+
+# 音频文件根目录：默认打包进 classpath 的 music/，可用环境变量覆盖为磁盘目录
+resource:
+  path:
+    audio:
+      music: ${AUDIO_MUSIC_PATH:classpath:music/}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
