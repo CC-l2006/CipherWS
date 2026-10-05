@@ -80,3 +80,8 @@ logs/
 # 若日后填入真实密钥或生产域名，请改为忽略 .env* 并保留 .env.example。
 .env
 .env.*.local
+
+# ---------- Docker 镜像 ----------
+# 镜像 tar 体积巨大（Nacos 镜像约 588 MB），不入库；用 docker load 从本地/外部介质还原。
+# 需要长期分发时改用 Docker Registry 或对象存储，不要提交进 Git（GitHub 单文件上限 100 MB）。
+docker/*.tar
