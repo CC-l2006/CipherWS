@@ -67,7 +67,8 @@ switch ($Action) {
 
         # Audio lives outside the repository now (131 MB of music files are
         # .gitignore'd). Point say-service at the on-disk directory so it can
-        # still stream audio; see deploy/music/ and deploy/README.md.
+        # still stream audio; see deploy/music/ and
+        # docs/2026-10-5/音频资源说明.md.
         $musicDir = Join-Path $projectRoot 'deploy\music'
         if (Test-Path $musicDir) {
             if (-not $env:AUDIO_MUSIC_PATH) {
@@ -78,7 +79,7 @@ switch ($Action) {
             }
         } else {
             Write-Host "Audio dir  : $musicDir not found -- audio endpoints will 404" -ForegroundColor Yellow
-            Write-Host "             see server\cipherws-say-service\src\main\resources\music\README.md" -ForegroundColor Yellow
+            Write-Host "             see docs/2026-10-5/音频资源说明.md" -ForegroundColor Yellow
         }
         Write-Host ''
 
