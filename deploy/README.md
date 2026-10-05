@@ -15,6 +15,8 @@ deploy/
 ├── nacos/                      # Nacos 3.3.0-RC standalone（已 ignore，约 235 MB）
 │   ├── bin/  conf/  target/    #   发行包解压后的标准结构
 │   └── data/  logs/            #   运行期生成（Derby 数据、日志）
+├── music/                      # 音频资源（已 ignore，约 131 MB）
+│                               #   由 run-services.ps1 经 AUDIO_MUSIC_PATH 注入
 ├── .logs/                      # 三个后端服务的 stdout/stderr（已 ignore）
 ├── fetch-nacos.ps1             # 下载 + 校验 MD5 + 解压 Nacos
 ├── start-nacos.ps1             # 启动 Nacos（standalone，后台）
@@ -41,6 +43,23 @@ deploy/
 > 控制台为什么是 **8849**：Nacos 上游默认 8080，会和网关冲突。
 > 本项目在 `nacos/conf/application.properties` 里设置
 > `nacos.console.port=8849`，与仓库原有的 `docker/run.sh` 端口映射保持一致。
+
+## 音频资源（已移出版本库）
+
+14 个音频文件（约 131 MB）已从 `server/.../resources/music/` 移出 Git，改放
+**`deploy/music/`**（同样不入库）：
+
+| | 说明 |
+| --- | --- |
+| 为什么 | 131 MB 会让仓库永久变重；GitHub 单文件上限 100 MB，超标即无法推送，事后删除也不缩小历史 |
+| 放哪 | `deploy/music/`（仓库外），或任意磁盘目录 |
+| 怎么生效 | `run-services.ps1` 启动时会自动注入 `AUDIO_MUSIC_PATH=file:<项目根>/deploy/music/` |
+| 手动覆盖 | 自己设 `AUDIO_MUSIC_PATH`（如 `file:D:/music/`），脚本会尊重已有值 |
+| 打包影响 | say-service 的 jar 从 **186 MB 降到 56 MB**（音频不再进 classpath） |
+
+> 注意：因为音频不在 classpath 了，**直接用 `java -jar` 裸启动 say-service 时音频接口会 404**，
+> 除非显式设置 `AUDIO_MUSIC_PATH`。建议统一用 `run-services.ps1` 启动。
+> 详见 [../server/cipherws-say-service/src/main/resources/music/README.md](../server/cipherws-say-service/src/main/resources/music/README.md)。
 
 ## 启动顺序
 
