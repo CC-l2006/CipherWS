@@ -38,6 +38,8 @@
           <span>/</span>
           <span>{{ formatTime(duration) }}</span>
         </div>
+        <!-- 音频加载/播放失败提示：例如后端音乐目录未配置该文件时 -->
+        <div v-if="errorMsg" class="progress-error">{{ errorMsg }}</div>
       </div>
 
       <!-- controls -->
@@ -135,35 +137,49 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { getAudioStreamUrl } from '@/api/audio-api.js'
 
 const props = defineProps({
   /** 由父组件控制的展开状态（点击悬浮球展开） */
   expanded: { type: Boolean, default: false }
 })
 
-// 音频源尚未配置，播放/暂停只切换 UI 状态。
+/**
+ * 曲目数据：file 为后端音乐根目录下的真实文件名（对应接口参数 audio）。
+ * 后端返回音频流（支持 Range 分段），这里只需拼出地址交给 <audio>。
+ * 换歌单时只改这个数组即可，播放逻辑不用动。
+ */
+const tracks = ref([
+  { title: '晴天', artist: '周杰伦', file: '周杰伦 - 晴天.mp3' },
+  { title: '七里香', artist: '周杰伦', file: '周杰伦 - 七里香.mp3' },
+  { title: '稻香', artist: '周杰伦', file: '周杰伦-稻香.mp3' },
+  { title: '夜曲', artist: '周jie伦', file: '周jie伦 - 夜曲.mp3' },
+  { title: 'だから僕は音楽を辞めた', artist: 'ヨルシカ', file: 'ヨルシカ-だから僕は音楽を辞めた.mp3' },
+  { title: '晴る', artist: 'ヨルシカ', file: 'ヨルシカ-晴る.mp3' },
+  { title: '春日影', artist: 'CRYCHIC', file: 'CRYCHIC - 春日影.ogg' },
+  { title: 'Da Capo', artist: 'HOYO-MiX', file: 'HOYO-MiX - Da Capo.mp3' },
+  { title: 'Regression', artist: '阿云嘎 / HOYO-MiX', file: '阿云嘎,HOYO-MiX - Regression.mp3' },
+  { title: '酸橙色信笺', artist: '塞壬唱片-MSR / DAZBEE', file: '塞壬唱片-MSR,DAZBEE - 酸橙色信笺.mp3' },
+  { title: 'さくらさくら ~ Japanize Dream', artist: 'Demetori', file: 'Demetori - さくらさくら ~ Japanize Dream.mp3' },
+  { title: 'Promise', artist: '山岡晃', file: '山岡晃 - Promise.mp3' },
+  { title: 'Sea（海）', artist: 'Pam_dinosaur', file: 'Pam_dinosaur - Sea（海）.mp3' },
+  { title: '穿越时空的思念（钢琴）', artist: '林桦柽', file: '林桦柽 - 穿越时空的思念（钢琴）.mp3' }
+])
+
+const currentIndex = ref(0)
 const isPlaying = ref(false)
 const isLiked = ref(false)
 const coverUrl = ref('')
 const currentTime = ref(0)
 const duration = ref(0)
-
-/**
- * 曲目数据：音频源尚未接入，src 先留空占位。
- * 以后把 src 填成真实地址即可，其余逻辑无需改动。
- */
-const tracks = ref([
-  { title: '起风了', artist: '买辣椒也用券', src: '' },
-  { title: '夜航星', artist: '池禾', src: '' },
-  { title: '云与电杆', artist: '池禾', src: '' },
-  { title: '晚风', artist: '池禾', src: '' },
-  { title: '未命名', artist: '池禾', src: '' }
-])
-
-const currentIndex = ref(0)
+/** 播放失败时给用户的提示（如音频文件未部署到后端音乐目录） */
+const errorMsg = ref('')
 const showList = ref(false)
 const listEl = ref(null)
+
+/** <audio> 元素：用 new Audio() 创建，避免往模板里塞节点影响现有布局与样式 */
+let audio = null
 
 // 展开状态由父组件控制
 const isOpen = computed(() => props.expanded)
@@ -172,16 +188,56 @@ const isOpen = computed(() => props.expanded)
 const currentTrack = computed(() => tracks.value[currentIndex.value] || {})
 const title = computed(() => currentTrack.value.title || '')
 const artist = computed(() => currentTrack.value.artist || '')
+const progressPercent = computed(() => {
+  if (!duration.value) return 0
+  return Math.min(100, (currentTime.value / duration.value) * 100)
+})
+
+/** 当前曲目的音频流地址（由后端 /audio/stream 提供） */
+function streamUrlFor (track) {
+  return getAudioStreamUrl(track && track.file)
+}
+
+function loadCurrent () {
+  if (!audio) return
+  currentTime.value = 0
+  duration.value = 0
+  errorMsg.value = ''
+  audio.src = streamUrlFor(currentTrack.value)
+  audio.load()
+}
+
+function play () {
+  if (!audio || !currentTrack.value.file) return
+  // 先点亮 UI（点击即响应），失败时再由 error 事件 / promise 回滚
+  isPlaying.value = true
+  const p = audio.play()
+  // 自动播放可能被浏览器策略拒绝，或被 404/网络错误阻断
+  if (p && typeof p.catch === 'function') {
+    p.catch(() => {
+      isPlaying.value = false
+      errorMsg.value = '播放失败，请确认后端音乐目录已配置'
+    })
+  }
+}
+
+function pause () {
+  if (audio) audio.pause()
+}
 
 function toggleList () {
   showList.value = !showList.value
 }
 
 function selectTrack (idx) {
+  if (idx === currentIndex.value) {
+    // 点当前曲目：等同播放/暂停
+    isPlaying.value ? pause() : play()
+    return
+  }
   currentIndex.value = idx
-  currentTime.value = 0
-  progressPercent.value = 0
-  // 音频源接入前只切高亮，不真的播放
+  loadCurrent()
+  play()
 }
 
 /**
@@ -202,11 +258,6 @@ watch(showList, (open) => {
   }
 })
 
-// 组件卸载时务必移除监听，避免泄漏
-onBeforeUnmount(() => {
-  document.removeEventListener('pointerdown', onDocPointerDown, true)
-})
-
 // 收起播放条时同时关掉列表
 watch(() => props.expanded, (open) => {
   if (!open) showList.value = false
@@ -219,27 +270,71 @@ function formatTime (seconds) {
   return `${m}:${s}`
 }
 
-const progressPercent = ref(0)
-
 function togglePlay () {
-  isPlaying.value = !isPlaying.value
+  isPlaying.value ? pause() : play()
 }
 
 function handlePrev () {
+  const wasPlaying = isPlaying.value
   currentIndex.value = (currentIndex.value - 1 + tracks.value.length) % tracks.value.length
-  currentTime.value = 0
-  progressPercent.value = 0
+  loadCurrent()
+  if (wasPlaying) play()
 }
 
 function handleNext () {
   currentIndex.value = (currentIndex.value + 1) % tracks.value.length
-  currentTime.value = 0
-  progressPercent.value = 0
+  loadCurrent()
+  play()
 }
 
-function handleProgressClick () {
-  // 音频源接入后在此换算点击位置对应的时间
+/** 点击进度条：按点击位置换算成播放时间并跳转 */
+function handleProgressClick (event) {
+  if (!audio || !duration.value) return
+  const bar = event.currentTarget.querySelector('.progress-bar')
+  if (!bar) return
+  const rect = bar.getBoundingClientRect()
+  if (!rect.width) return
+  const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
+  audio.currentTime = ratio * duration.value
+  currentTime.value = audio.currentTime
 }
+
+onMounted(() => {
+  audio = new Audio()
+  audio.preload = 'metadata'
+  audio.addEventListener('loadedmetadata', () => {
+    duration.value = Number.isFinite(audio.duration) ? audio.duration : 0
+  })
+  audio.addEventListener('timeupdate', () => {
+    currentTime.value = audio.currentTime
+  })
+  audio.addEventListener('play', () => { isPlaying.value = true })
+  audio.addEventListener('playing', () => {
+    isPlaying.value = true
+    errorMsg.value = ''
+  })
+  audio.addEventListener('pause', () => { isPlaying.value = false })
+  // 播放结束自动跳下一首
+  audio.addEventListener('ended', handleNext)
+  audio.addEventListener('error', () => {
+    isPlaying.value = false
+    duration.value = 0
+    errorMsg.value = '该音频加载失败（后端音乐目录中可能没有此文件）'
+  })
+  // 预载首曲的时长信息，展开后时间就能显示
+  loadCurrent()
+})
+
+// 组件卸载时停止播放并移除监听，避免音乐继续响、避免泄漏
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocPointerDown, true)
+  if (audio) {
+    audio.pause()
+    audio.removeAttribute('src')
+    audio.load()
+    audio = null
+  }
+})
 </script>
 
 <style scoped>
@@ -433,6 +528,20 @@ function handleProgressClick () {
   /* 默认（圆形悬浮球）状态隐藏时间：高度只有 56px，必须精简内容。
      触屏用 .is-open（类挂在 #music-box 上）判断，因此两个条件都要覆盖。 */
   #music-box:not(.is-open) .progress-time {
+    display: none;
+  }
+
+  /* 播放失败提示：小号红字，只在展开的胶囊里显示（与时间同策略） */
+  .progress-error {
+    font-size: 9px;
+    line-height: 1.1;
+    color: #ffd9d9;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #music-box:not(.is-open) .progress-error {
     display: none;
   }
 
