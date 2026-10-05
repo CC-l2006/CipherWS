@@ -31,8 +31,7 @@ CipherWS/
 
 > 音频资源（`server/cipherws-say-service/.../music/`，约 131 MB）**不入库**，
 > 改为放在仓库外的 `deploy/music/`，由 `deploy/run-services.ps1` 通过
-> `AUDIO_MUSIC_PATH` 注入。详见
-> [server/cipherws-say-service/src/main/resources/music/README.md](server/cipherws-say-service/src/main/resources/music/README.md)。
+> `AUDIO_MUSIC_PATH` 注入。详见 [docs/2026-10-5/音频资源说明.md](docs/2026-10-5/音频资源说明.md)。
 
 ## 二、后端模块（server/）
 
@@ -81,13 +80,15 @@ cd ../frontend && npm install && npm run dev
 > powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\run-services.ps1 -Action start
 > ```
 >
-> 详见 [deploy/README.md](deploy/README.md)。
+> 详见 [docs/2026-10-5/本地部署说明.md](docs/2026-10-5/本地部署说明.md)。
 
 ## 四、文档索引
 
 | 文档 | 内容 |
 | --- | --- |
-| [deploy/README.md](deploy/README.md) | Windows 本地部署：项目内 JDK/Nacos、启停脚本、鉴权说明 |
+| [docs/2026-10-5/本地部署说明.md](docs/2026-10-5/本地部署说明.md) | Windows 本地部署：项目内 JDK/Nacos、启停脚本、鉴权说明 |
+| [docs/2026-10-5/项目本地工具链.md](docs/2026-10-5/项目本地工具链.md) | 项目内 JDK 17 工具链：安装脚本与用法 |
+| [docs/2026-10-5/音频资源说明.md](docs/2026-10-5/音频资源说明.md) | 音频为何移出版本库、放在哪、如何生效 |
 | [docs/微服务架构.md](docs/微服务架构.md) | 后端微服务结构、Nacos、OpenFeign、运行方式 |
 | [docs/Nacos容器部署.md](docs/Nacos容器部署.md) | `docker/` 目录说明与 Nacos 容器部署 |
 | [docs/分层架构.md](docs/分层架构.md) | 自上而下的分层架构设计 |

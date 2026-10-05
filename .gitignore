@@ -63,16 +63,14 @@ frontend/pnpm-workspace.yaml
 target/
 !.mvn/wrapper/maven-wrapper.jar
 
-# 音频资源：不入库（14 个文件共约 131 MB）
+# 音频资源：整个目录不入库（原 14 个文件共约 131 MB）
 #   原因：体积过大，会让仓库和 clone 永久变重（GitHub 单文件上限 100 MB，
-#         一旦有文件超标就再也推不上去，且删掉也不会让历史变小）。
-#   音频改为放在仓库外（移动硬盘 / 网盘 / 对象存储），部署时放到磁盘目录，
-#   由 AUDIO_MUSIC_PATH 环境变量指向（见 deploy/README.md）。
-#   注意：本目录下只保留 README.md 作为说明，音频文件本体一律忽略。
-#   用 /* 而不是 / 是为了让该目录下的 README.md 能被 git 跟踪
-#   （若某天产生子目录且也要入库，需把 / 换成 /**）。
-server/cipherws-say-service/src/main/resources/music/*
-!server/cipherws-say-service/src/main/resources/music/README.md
+#         一旦有文件超标就再也推不上去，且事后删除也不会让历史变小）。
+#   现状：音频统一放在仓库外的 deploy/music/，由 run-services.ps1 通过
+#         AUDIO_MUSIC_PATH 环境变量注入；配置项是 resource.path.audio.music。
+#   说明：本目录（代码区）不再放任何文件，包括说明文档；
+#         相关文档见 docs/2026-10-5/音频资源说明.md。
+server/cipherws-say-service/src/main/resources/music/
 
 # 日志
 logs/
@@ -93,9 +91,10 @@ logs/
 .env.*.local
 
 # ---------- 部署：deploy/ ----------
-# 结构约定：deploy/ 下「可再生的大体积资产」一律不入库，
-# 只入库脚本与文档（fetch-nacos.ps1 / start-nacos.ps1 / stop-nacos.ps1 /
-# run-services.ps1 / README.md），换机器跑一次脚本即可重建。
+# 结构约定：deploy/ 下「可再生的大体积资产」一律不入库；
+# 只入库 4 个脚本（fetch-nacos / start-nacos / stop-nacos / run-services），
+# 换机器跑一次脚本即可重建。相关说明文档统一放在 docs/<日期>/ 下，
+# 不在代码区放 README（约定见 docs/2026-10-5/本地部署说明.md）。
 
 # 项目本地工具链（JDK 17 等，约 300 MB），由 deploy/.tools/fetch-jdk17.ps1 重建
 deploy/.tools/
@@ -109,7 +108,8 @@ deploy/nacos/
 deploy/*.zip
 
 # 音频资源实际存放目录（约 131 MB）：从 server/.../resources/music 移出仓库，
-# 由 run-services.ps1 通过 AUDIO_MUSIC_PATH 注入。详见 deploy/README.md
+# 由 run-services.ps1 通过 AUDIO_MUSIC_PATH 注入。
+# 详见 docs/2026-10-5/音频资源说明.md
 deploy/music/
 
 # 后端服务运行日志（redeploy/run-services.ps1 生成）
