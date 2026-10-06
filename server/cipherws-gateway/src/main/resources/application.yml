@@ -1,0 +1,52 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: cipherws-gateway
+  cloud:
+    nacos:
+      server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+      username: nacos
+      password: 1357924680bb
+      discovery:
+        namespace: ${NACOS_NAMESPACE:}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+      config:
+        namespace: ${NACOS_NAMESPACE:}
+        group: ${NACOS_GROUP:DEFAULT_GROUP}
+        file-extension: yaml
+    gateway:
+      # Spring Cloud Gateway 4.3 起使用 server.webflux.* 命名空间
+      server:
+        webflux:
+          # 使用显式路由（如需按服务名自动映射，可开启 discovery.locator）
+          discovery:
+            locator:
+              enabled: false
+              lower-case-service-id: true
+          routes:
+            - id: cipherws-say-service
+              uri: lb://cipherws-say-service
+              predicates:
+                - Path=/say/**
+            - id: cipherws-audio-service
+              uri: lb://cipherws-say-service
+              predicates:
+                - Path=/audio/**
+            - id: cipherws-portal-service
+              uri: lb://cipherws-portal-service
+              predicates:
+                - Path=/portal/**
+  config:
+    import:
+      - optional:nacos:cipherws-gateway.yaml
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
+  endpoint:
+    health:
+      show-details: always
