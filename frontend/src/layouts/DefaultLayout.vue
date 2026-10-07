@@ -25,18 +25,13 @@
 
     <transition name="fade" appear>
       <!--
-        展开/收起由点击驱动（不再用 :hover）。
-        这里用"按目标判断"而不是 @click.self：
-        因为 .music-root 会填满 #music-wrapper，e.target 永远不可能是 wrapper 本身，
-        @click.self 会完全失效（实测点击无法展开）。
-        点控件或列表时直接返回，不切换展开态。
+        展开/收起只由播放器左侧的封面图标触发（在 music-player 组件内），
+        这里只负责持有状态，不再在容器上监听点击。
+        原因：容器上监听会把整条播放条都变成开关区——点击播放/暂停等
+        控件时容易误触发收起（实测真实鼠标点击会复现）。
       -->
-      <div
-        id="music-wrapper"
-        :class="{ 'is-open': musicOpen }"
-        @click="handleMusicClick"
-      >
-        <music-player :expanded="musicOpen" />
+      <div id="music-wrapper" :class="{ 'is-open': musicOpen }">
+        <music-player :expanded="musicOpen" @toggle-open="musicOpen = $event" />
       </div>
     </transition>
   </div>
@@ -56,19 +51,8 @@ const route = useRoute()
 // 默认向左（点「链接」的方向）
 const transitionName = ref('slide-left')
 
-// 音乐播放器展开状态（点击展开 / 收起）
+// 音乐播放器展开状态（由播放器内的封面上报切换）
 const musicOpen = ref(false)
-
-/**
- * 点击悬浮球展开、再点空白处收起。
- * 点内部控件（播放/切歌/收藏/进度条/列表按钮）时不切换，避免误触。
- */
-function handleMusicClick (event) {
-  const el = event.target
-  // 命中间隔区（封面、留白）才切换展开态
-  if (el.closest && el.closest('.ctrl-btn, .progress-bar-wrapper, .playlist')) return
-  musicOpen.value = !musicOpen.value
-}
 
 /**
  * 根据目标路由的深度决定滑动方向：

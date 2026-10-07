@@ -5,16 +5,26 @@
   -->
   <div class="music-root">
     <div id="music-box" :class="{ 'is-playing': isPlaying, 'is-open': isOpen }">
-      <!-- 封面 -->
-      <div class="cover-wrapper">
-        <div class="cover" :class="{ spinning: isPlaying }">
-          <img v-if="coverUrl" :src="coverUrl" alt="cover" @error="coverUrl = ''" />
-          <div v-else class="cover-placeholder"><span>&#x1f3b5;</span></div>
-        </div>
-        <div class="play-indicator" v-if="isPlaying">
+      <!-- 封面：展开/收起的唯一触发区。
+           用 button 包一层，既保证可点区域明确（只有左边的圆形图标），
+           又保留键盘可操作性。其余区域（曲名、进度条、控制按钮）不再触发开关，
+           避免点击播放/暂停等控件时把播放条收起。 -->
+      <button
+        class="cover-wrapper"
+        type="button"
+        @click="toggleOpen"
+        :title="isOpen ? '收起' : '展开'"
+        :aria-label="isOpen ? '收起播放器' : '展开播放器'"
+        :aria-expanded="isOpen"
+      >
+        <span class="cover" :class="{ spinning: isPlaying }">
+          <img v-if="coverUrl" :src="coverUrl" alt="" @error="coverUrl = ''" />
+          <span v-else class="cover-placeholder">&#x1f3b5;</span>
+        </span>
+        <span class="play-indicator" v-if="isPlaying" aria-hidden="true">
           <span class="bar"></span><span class="bar"></span><span class="bar"></span>
-        </div>
-      </div>
+        </span>
+      </button>
 
       <!-- 曲目信息：仅在展开成胶囊时显示 -->
       <div class="music-info">
@@ -141,9 +151,16 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getAudioStreamUrl } from '@/api/audio-api.js'
 
 const props = defineProps({
-  /** 由父组件控制的展开状态（点击悬浮球展开） */
+  /** 由父组件控制的展开状态 */
   expanded: { type: Boolean, default: false }
 })
+
+const emit = defineEmits(['toggle-open'])
+
+/** 切换展开/收起：由父组件持有状态，这里只上报意图 */
+function toggleOpen () {
+  emit('toggle-open', !props.expanded)
+}
 
 /**
  * 曲目数据：file 为后端音乐根目录下的真实文件名（对应接口参数 audio）。
@@ -376,6 +393,22 @@ onBeforeUnmount(() => {
   .cover-wrapper {
     position: relative;
     flex: none;
+    /* 由 div 改为 button 以承载展开/收起点击，这里必须重置浏览器默认样式，
+       否则默认的 padding/border/background 会把 42px 的圆形挤变形。 */
+    padding: 0;
+    margin: 0;
+    background: none;
+    border: none;
+    line-height: 0;
+    /* 圆形的视觉由内层 .cover 决定，这里不设尺寸，保持与原来一致 */
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .cover-wrapper:focus-visible {
+    outline: 2px solid #ffffff;
+    outline-offset: 2px;
+    border-radius: 50%;
   }
 
   .cover {
