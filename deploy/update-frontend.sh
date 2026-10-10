@@ -243,15 +243,44 @@ EOF
     return 0
   fi
 
+  # 整行缺失：import.meta.env.VITE_API_BASE_URL 会变成 undefined，
+  # 请求地址被拼成 "undefined/say/saying"。补一行空值。
+  if ! grep -qE '^[[:space:]]*VITE_API_BASE_URL[[:space:]]*=' "$prod"; then
+    warn "$prod 里没有 VITE_API_BASE_URL 这一行"
+    warn "这会让 import.meta.env.VITE_API_BASE_URL 变成 undefined，"
+    warn "请求地址被拼成 \"undefined/say/saying\"。已自动补一行空值。"
+    printf '\n# 由 update-frontend.sh 自动补上（同源模式）\nVITE_API_BASE_URL=\n' >> "$prod"
+    ok "已补齐 VITE_API_BASE_URL=（同源模式）"
+    return 0
+  fi
+
   val="$(grep -E '^[[:space:]]*VITE_API_BASE_URL[[:space:]]*=' "$prod" | tail -n1 | cut -d= -f2- | tr -d '[:space:]' || true)"
+
   if [[ -z "$val" ]]; then
     ok "$prod 已是同源模式（VITE_API_BASE_URL 留空）"
-  else
-    warn "$prod 里 VITE_API_BASE_URL=$val"
-    warn "若线上已用 nginx 同源反代，这里应留空；否则浏览器会直连该地址，"
-    warn "既跨域，又会撞上 SakuraFrp 对浏览器直连的安全认证限制。"
-    warn "改完记得重跑本脚本：环境变量是构建时内联的，改文件不重新构建无效。"
+    return 0
   fi
+
+  # .env.example 里的占位地址：只可能是「忘了改」，绝不可能是想要的值。
+  # 这个坑很隐蔽 —— 端口写成字母 "port"，浏览器 new URL() 抛
+  # "Failed to parse URL"，请求根本发不出去；而页面看起来完全正常
+  # （名言显示的是组件兜底文案），排查时容易误以为是跨域或鉴权问题。
+  # 所以这里直接纠正成同源模式，而不是只告警。
+  if [[ "$val" == *"your-backend-host"* ]]; then
+    warn "$prod 里还是 .env.example 的占位地址：VITE_API_BASE_URL=$val"
+    warn "这个值的端口是字母 port，浏览器会直接抛 Failed to parse URL，"
+    warn "请求发不出去，但页面看起来正常 —— 属于很难排查的坑。"
+    local tmp="$prod.tmp.$$"
+    sed -E 's|^[[:space:]]*VITE_API_BASE_URL[[:space:]]*=.*$|VITE_API_BASE_URL=|' "$prod" > "$tmp" \
+      && mv "$tmp" "$prod"
+    ok "已自动改写为同源模式（VITE_API_BASE_URL 留空）"
+    return 0
+  fi
+
+  warn "$prod 里 VITE_API_BASE_URL=$val"
+  warn "若线上已用 nginx 同源反代，这里应留空；否则浏览器会直连该地址，"
+  warn "既跨域，又会撞上 SakuraFrp 对浏览器直连的安全认证限制。"
+  warn "改完记得重跑本脚本：环境变量是构建时内联的，改文件不重新构建无效。"
 }
 
 step "检查环境变量文件"
@@ -313,6 +342,19 @@ for sub in main train; do
     || die "$sub 构建没有产出 frontend/$sub/dist/index.html"
   ok "$sub 构建完成 → frontend/$sub/dist"
 done
+
+# 产物自检：接口地址是构建时内联的，配置错了产物里会留下痕迹。
+# 这里直接查产物而不是只查 .env，因为无论问题出在哪个环节都能兜住。
+if site_wanted main && [[ -d "$REPO_DIR/frontend/main/dist/assets" ]]; then
+  if grep -rq 'your-backend-host' "$REPO_DIR/frontend/main/dist/assets" 2>/dev/null; then
+    warn "产物里出现了 .env.example 的占位地址 your-backend-host！"
+    warn "这个值的端口是字母 port，浏览器会抛 Failed to parse URL，所有接口都会失败，"
+    warn "但页面看起来正常 —— 很难排查。请把 frontend/main/.env.production 改成"
+    warn "VITE_API_BASE_URL=（留空）后重跑本脚本。"
+  else
+    ok "产物自检：没有占位地址残留"
+  fi
+fi
 
 # -----------------------------------------------------------------------------
 # 5. 重启主站服务
