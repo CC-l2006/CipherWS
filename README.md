@@ -68,7 +68,7 @@ java -jar cipherws-gateway/target/cipherws-gateway-0.0.1-SNAPSHOT.jar
 cd ../frontend
 npm run install:all        # 给 main 与 train 各装一次依赖
 npm run dev:main           # 主站   → http://127.0.0.1:8000
-npm run dev:train          # 列车站 → http://127.0.0.1:3000
+npm run dev:train          # 列车站 → http://127.0.0.1:8001
 ```
 
 验证：`curl http://127.0.0.1:8080/say/saying?id=1`

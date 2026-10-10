@@ -3,9 +3,14 @@
  *
  * 一份脚本服务两个站点，各自指向自己的构建产物：
  *   frontend/main/dist     主站 → 默认 8000
- *   frontend/train/dist    云间列车 → 默认 3000
+ *   frontend/train/dist    云间列车 → 默认 8001
  * 两个站点用「不同端口」区分，直接对应 nginx 双 server 块的两个 root，
  * 备案通过后把 nginx 的 root 指到同样的目录即可，产物不用重排。
+ *
+ * 端口分配约定（见下方 SITES）：frontend/ 下的子项目按 8000 + 序号顺延，
+ * main = 8000、train = 8001，以后新增的依次 8002 / 8003 …。
+ * 注意这些端口只用于本机预览与局域网访问，**对外始终是 80/443 上的域名**，
+ * 不靠端口号区分站点。
  *
  * 为什么需要它，而不是随便找个静态服务器：
  *   main 用的是 vue-router 的 createWebHistory（HTML5 history 模式），
@@ -15,9 +20,9 @@
  *
  * 用法：
  *   node server.js --app main              # 主站，0.0.0.0:8000，服务 main/dist
- *   node server.js --app train             # 云间列车，0.0.0.0:3000，服务 train/dist
+ *   node server.js --app train             # 云间列车，0.0.0.0:8001，服务 train/dist
  *   node server.js --app main --port 80    # 换端口（80 需要 root 或 setcap）
- *   APP=train PORT=3000 node server.js     # 也支持环境变量写法
+ *   APP=train PORT=8001 node server.js     # 也支持环境变量写法
  *   ROOT=/opt/cipherws/frontend/main/dist node server.js
  *
  * nginx 双 server 块配置见 deploy/nginx/cipherws.conf。
@@ -28,10 +33,12 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { createGzip } = require('node:zlib')
 
-// 站点注册表：新增子站点只在这里加一行，并在 frontend/<名字>/ 下建工程
+// 站点注册表：新增子站点只在这里加一行，并在 frontend/<名字>/ 下建工程。
+// 端口按 8000 + 序号顺延（main=8000 / train=8001 / 下一个 8002 …），
+// 避开 8080（网关）、8081/8082（后端服务）、8848/8849（Nacos）。
 const SITES = {
   main: { port: 8000, label: '主站' },
-  train: { port: 3000, label: '云间列车' }
+  train: { port: 8001, label: '云间列车' }
 }
 
 function readArg(name) {
