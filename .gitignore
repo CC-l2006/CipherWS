@@ -106,9 +106,10 @@ logs/
 
 # ---------- 部署：deploy/ ----------
 # 结构约定：deploy/ 下「可再生的大体积资产」一律不入库；
-# 只入库 4 个脚本（fetch-nacos / start-nacos / stop-nacos / run-services），
-# 换机器跑一次脚本即可重建。相关说明文档统一放在 docs/<日期>/ 下，
-# 不在代码区放 README（约定见 docs/2026-10-5/本地部署说明.md）。
+# 只入库 5 个脚本（fetch-nacos / start-nacos / stop-nacos / run-services / update-frontend）
+# 与 nginx 配置（nginx/cipherws.conf），换机器跑一次脚本即可重建。
+# 相关说明文档统一放在 docs/<日期>/ 下，不在代码区放 README
+# （约定见 docs/2026-10-5/本地部署说明.md）。
 
 # 项目本地工具链（JDK 17 等，约 300 MB），由 deploy/.tools/fetch-jdk17.ps1 重建
 deploy/.tools/
