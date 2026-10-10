@@ -21,7 +21,7 @@
 #
 # 可用环境变量覆盖默认值（一般不需要改）：
 #   REPO_DIR=/opt/cipherws          BRANCH=main
-#   MAIN_SERVICE=cipherws-web-main  MAIN_PORT=8000
+#   MAIN_SERVICE=auto               MAIN_PORT=8000
 #   NGINX_CONF=/etc/nginx/conf.d/cipherws.conf
 # =============================================================================
 
@@ -42,7 +42,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SELF="$SCRIPT_DIR/$(basename -- "${BASH_SOURCE[0]}")"
 REPO_DIR="${REPO_DIR:-$(dirname -- "$SCRIPT_DIR")}"
 BRANCH="${BRANCH:-main}"
-MAIN_SERVICE="${MAIN_SERVICE:-cipherws-web-main}"
+MAIN_SERVICE="${MAIN_SERVICE:-auto}"   # auto = 自动探测 cipherws-web* 单元
 MAIN_PORT="${MAIN_PORT:-8000}"
 NGINX_CONF="${NGINX_CONF:-/etc/nginx/conf.d/cipherws.conf}"
 NGINX_SRC_REL="deploy/nginx/cipherws.conf"
@@ -75,7 +75,9 @@ CipherWS 前端一键更新
 常用环境变量：
   REPO_DIR=/opt/cipherws       仓库目录（默认取脚本所在目录的上级）
   BRANCH=main                  要拉取的分支
-  MAIN_SERVICE=cipherws-web-main   主站的 systemd 服务名
+  MAIN_SERVICE=auto                主站的 systemd 服务名；auto=自动探测 cipherws-web*
+                                   （历史上叫 cipherws-web，文档里建议叫 cipherws-web-main，
+                                     两种都能认出来；要写死就显式赋值）
   NGINX_CONF=/etc/nginx/conf.d/cipherws.conf   nginx 站点配置路径
 
 示例：
@@ -122,6 +124,35 @@ step() { printf '\n%s==> %s%s\n' "$C_INFO" "$*" "$C_OFF"; }
 die()  { printf '%s[错误]%s %s\n' "$C_ERR" "$C_OFF" "$*" >&2; exit 1; }
 
 site_wanted() { [[ "$SITE" == "all" || "$SITE" == "$1" ]]; }
+
+# 探测主站的 systemd 服务名。
+#
+# 为什么要探测而不是写死：历史上这个服务叫 cipherws-web，后来文档建议改名成
+# cipherws-web-main。写死任何一个，在另一种命名方式上都会"找不到单元"。
+# 所以默认 MAIN_SERVICE=auto，自动在已安装的单元里找 cipherws-web*，
+# 优先精确匹配这两个名字；显式指定 MAIN_SERVICE=xxx 时不探测。
+resolve_main_service() {
+  if [[ "$MAIN_SERVICE" != "auto" ]]; then
+    printf '%s' "$MAIN_SERVICE"
+    return 0
+  fi
+
+  local found
+  found="$(systemctl list-unit-files --type=service 2>/dev/null \
+           | awk '/^cipherws-web/ {print $1}' | sed 's/\.service$//' || true)"
+
+  local name
+  for name in cipherws-web-main cipherws-web; do
+    if printf '%s\n' "$found" | grep -qx "$name"; then
+      printf '%s' "$name"
+      return 0
+    fi
+  done
+
+  # 实在没有标准名，就退到任意 cipherws-web* 单元（例如 cipherws-web-train 之外的）
+  name="$(printf '%s\n' "$found" | grep -v '^$' | head -n1 || true)"
+  printf '%s' "$name"
+}
 
 # -----------------------------------------------------------------------------
 # 0. 环境自检
@@ -293,17 +324,22 @@ elif [[ "$DO_RESTART" -eq 0 ]]; then
 else
   step "重启主站服务"
 
-  if ! systemctl list-unit-files 2>/dev/null | grep -q "^${MAIN_SERVICE}\.service"; then
-    warn "找不到 systemd 单元 ${MAIN_SERVICE}.service，跳过重启"
-    warn "用 systemctl list-units --type=service | grep -i cipherws 确认实际服务名，"
+  SVC="$(resolve_main_service)"
+
+  if [[ -z "$SVC" ]]; then
+    warn "在 systemd 里找不到任何 cipherws-web* 服务，跳过重启"
+    warn "确认实际服务名：systemctl list-units --type=service | grep -i cipherws"
     warn "再以 MAIN_SERVICE=实际名字 重跑本脚本"
   else
-    $SUDO systemctl restart "$MAIN_SERVICE" || die "重启 $MAIN_SERVICE 失败"
+    if [[ "$MAIN_SERVICE" == "auto" ]]; then
+      info "自动探测到主站服务：$SVC"
+    fi
+    $SUDO systemctl restart "$SVC" || die "重启 $SVC 失败"
     sleep 1
-    if systemctl is-active --quiet "$MAIN_SERVICE"; then
-      ok "$MAIN_SERVICE 已重启并处于 active"
+    if systemctl is-active --quiet "$SVC"; then
+      ok "$SVC 已重启并处于 active"
     else
-      die "$MAIN_SERVICE 重启后不是 active，用 journalctl -u $MAIN_SERVICE -n 50 看日志"
+      die "$SVC 重启后不是 active，用 journalctl -u $SVC -n 50 看日志"
     fi
   fi
 fi
@@ -317,7 +353,11 @@ fi
 # -----------------------------------------------------------------------------
 if [[ "$DO_RESTART" -eq 1 && -f "$REPO_DIR/$NGINX_SRC_REL" ]]; then
   if [[ ! -d "$(dirname -- "$NGINX_CONF")" ]]; then
-    info "未发现 nginx（$(dirname -- "$NGINX_CONF") 不存在），跳过配置同步"
+    warn "未发现 nginx（$(dirname -- "$NGINX_CONF") 不存在），跳过配置同步"
+    warn "注意：只在阿里云安全组里放行 80 是不够的 —— 端口开放 ≠ 有进程监听。"
+    warn "装好 nginx 后重跑本脚本即可自动装配："
+    warn "    sudo apt update && sudo apt install -y nginx"
+    warn "    sudo rm -f /etc/nginx/sites-enabled/default   # 挪走自带站点，免得抢 80"
   elif [[ -f "$NGINX_CONF" ]] && cmp -s "$REPO_DIR/$NGINX_SRC_REL" "$NGINX_CONF"; then
     ok "nginx 配置无变化"
   else
@@ -367,7 +407,7 @@ if [[ "$DO_VERIFY" -eq 1 ]]; then
         ok "主站 http://127.0.0.1:${MAIN_PORT}/ 响应正常"
       else
         warn "主站 http://127.0.0.1:${MAIN_PORT}/ 无响应"
-        warn "排查：systemctl status ${MAIN_SERVICE}；journalctl -u ${MAIN_SERVICE} -n 50"
+        warn "排查：systemctl status ${SVC:-$(resolve_main_service)}；journalctl -u ${SVC:-$(resolve_main_service)} -n 50"
       fi
     fi
 
