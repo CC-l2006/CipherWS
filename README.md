@@ -52,8 +52,6 @@ server/
 
 > Nacos 控制台在容器内是 8080，为避开网关占用的 8080，`docker/run.sh` 已把它映射到宿主 **8849**。
 
-详见 [docs/微服务架构.md](docs/微服务架构.md)。
-
 ## 三、快速开始
 
 ```bash
@@ -93,8 +91,4 @@ npm run dev:train          # 列车站 → http://127.0.0.1:3000
 | [docs/2026-10-5/本地部署说明.md](docs/2026-10-5/本地部署说明.md) | Windows 本地部署：项目内 JDK/Nacos、启停脚本、鉴权说明 |
 | [docs/2026-10-5/项目本地工具链.md](docs/2026-10-5/项目本地工具链.md) | 项目内 JDK 17 工具链：安装脚本与用法 |
 | [docs/2026-10-5/音频资源说明.md](docs/2026-10-5/音频资源说明.md) | 音频为何移出版本库、放在哪、如何生效 |
-| [docs/微服务架构.md](docs/微服务架构.md) | 后端微服务结构、Nacos、OpenFeign、运行方式 |
-| [docs/Nacos容器部署.md](docs/Nacos容器部署.md) | `docker/` 目录说明与 Nacos 容器部署 |
-| [docs/分层架构.md](docs/分层架构.md) | 自上而下的分层架构设计 |
-| [docs/架构设计.md](docs/架构设计.md) | 总体拓扑、部署流程与决策记录 |
 | [server/接口文档.md](server/接口文档.md) | 后端接口说明 |
