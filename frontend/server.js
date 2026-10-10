@@ -1,16 +1,26 @@
 /**
  * CipherWS 前端静态服务（零依赖，只用 Node 内置模块）
  *
+ * 一份脚本服务两个站点，各自指向自己的构建产物：
+ *   frontend/main/dist     主站 → 默认 8000
+ *   frontend/train/dist    云间列车 → 默认 3000
+ * 两个站点用「不同端口」区分，直接对应 nginx 双 server 块的两个 root，
+ * 备案通过后把 nginx 的 root 指到同样的目录即可，产物不用重排。
+ *
  * 为什么需要它，而不是随便找个静态服务器：
- *   前端用的是 vue-router 的 createWebHistory（HTML5 history 模式），
+ *   main 用的是 vue-router 的 createWebHistory（HTML5 history 模式），
  *   /link 这类路径在磁盘上并不存在对应文件。如果服务器找不到文件就返回 404，
  *   用户在 /link 页面按 F5 刷新、或直接粘贴网址访问，就会看到 404。
  *   所以必须做 SPA 回退：找不到的路径统一回落给 index.html，交给前端路由处理。
  *
  * 用法：
- *   node server.js                 # 默认 0.0.0.0:8000，服务同目录下的 dist/
- *   PORT=80 node server.js         # 换端口（80 需要 root 或 setcap）
- *   ROOT=/opt/cipherws/frontend/dist PORT=8000 node server.js
+ *   node server.js --app main              # 主站，0.0.0.0:8000，服务 main/dist
+ *   node server.js --app train             # 云间列车，0.0.0.0:3000，服务 train/dist
+ *   node server.js --app main --port 80    # 换端口（80 需要 root 或 setcap）
+ *   APP=train PORT=3000 node server.js     # 也支持环境变量写法
+ *   ROOT=/opt/cipherws/frontend/main/dist node server.js
+ *
+ * nginx 双 server 块配置见 deploy/nginx/cipherws.conf。
  */
 
 const http = require('node:http')
@@ -18,9 +28,27 @@ const fs = require('node:fs')
 const path = require('node:path')
 const { createGzip } = require('node:zlib')
 
-const PORT = Number(process.env.PORT || 8000)
-const HOST = process.env.HOST || '0.0.0.0'
-const ROOT = path.resolve(process.env.ROOT || path.join(__dirname, 'dist'))
+// 站点注册表：新增子站点只在这里加一行，并在 frontend/<名字>/ 下建工程
+const SITES = {
+  main: { port: 8000, label: '主站' },
+  train: { port: 3000, label: '云间列车' }
+}
+
+function readArg(name) {
+  const i = process.argv.indexOf(`--${name}`)
+  return i > -1 ? process.argv[i + 1] : undefined
+}
+
+// 命令行 --app 优先于环境变量 APP，缺省 main
+const APP = String(readArg('app') || process.env.APP || 'main').toLowerCase()
+if (!SITES[APP]) {
+  console.error(`未知站点 "${APP}"，可选：${Object.keys(SITES).join(' / ')}`)
+  process.exit(1)
+}
+
+const PORT = Number(readArg('port') || process.env.PORT || SITES[APP].port)
+const HOST = readArg('host') || process.env.HOST || '0.0.0.0'
+const ROOT = path.resolve(process.env.ROOT || path.join(__dirname, APP, 'dist'))
 
 // 带内容 hash 的构建产物可以永久缓存；index.html 绝不能缓存，
 // 否则用户会一直拿到旧版本、指向已被删除的资源文件。
@@ -145,14 +173,14 @@ const server = http.createServer((req, res) => {
     res,
     404,
     { 'Content-Type': 'text/plain; charset=utf-8' },
-    `404 Not Found\n\n未找到 ${ROOT}\\index.html\n请先执行 npm run build 生成 dist/`
+    `404 Not Found\n\n未找到 ${path.join(ROOT, 'index.html')}\n请先执行 npm run build:${APP} 生成 frontend/${APP}/dist/`
   )
 })
 
 server.listen(PORT, HOST, () => {
-  console.log(`CipherWS 前端已启动: http://${HOST}:${PORT}`)
+  console.log(`[${APP}] ${SITES[APP].label} 已启动: http://${HOST}:${PORT}`)
   console.log(`静态根目录: ${ROOT}`)
   if (!fs.existsSync(ROOT)) {
-    console.warn(`[警告] 静态根目录不存在，请先在 frontend/ 下执行 npm run build`)
+    console.warn(`[警告] 静态根目录不存在，请先在 frontend/ 下执行 npm run build:${APP}`)
   }
 })

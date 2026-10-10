@@ -1,24 +1,18 @@
 {
-  "name": "vue3_cli_default",
-  "version": "0.0.0",
+  "name": "cipherws-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CipherWS 前端工作区：main（主站）+ train（云间列车）。两个子项目各自独立构建，由 nginx 双 server 块分别托管。本文件只做命令编排，不含任何依赖。",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "serve": "vite preview"
-  },
-  "dependencies": {
-    "@element-plus/icons-vue": "^2.3.2",
-    "axios": "^1.20.0",
-    "element-plus": "^2.14.7",
-    "lottie-web": "^5.13.0",
-    "pinia": "^4.0.3",
-    "vue": "^3.4.0",
-    "vue-router": "^4.6.4"
-  },
-  "devDependencies": {
-    "@vitejs/plugin-vue": "^5.2.4",
-    "@vue/compiler-sfc": "^3.2.6",
-    "sass": "^1.101.0",
-    "vite": "^5.4.21"
+    "install:all": "npm --prefix main install && npm --prefix train install",
+    "dev:main": "npm --prefix main run dev",
+    "dev:train": "npm --prefix train run dev",
+    "build": "npm run build:main && npm run build:train",
+    "build:main": "npm --prefix main run build",
+    "build:train": "npm --prefix train run build",
+    "preview:main": "npm --prefix main run serve",
+    "preview:train": "npm --prefix train run preview",
+    "serve:main": "node server.js --app main",
+    "serve:train": "node server.js --app train"
   }
 }

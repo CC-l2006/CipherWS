@@ -8,7 +8,7 @@ CipherWS 是一个前后端同仓的个人建站项目：前端为 Vue 3 + Vite 
 
 ```
 CipherWS/
-├── frontend/          # 前端工程（Vue 3 + Vite 单页应用）
+├── frontend/          # 前端工作区（main 主站 + train 云间列车，两个独立 Vite 工程）
 ├── server/            # 后端工程（Spring Cloud Alibaba 微服务，Maven 多模块）
 ├── deploy/            # 本地部署：项目内 JDK/Nacos 与启停脚本
 ├── docker/            # 容器化部署资产（Nacos 镜像与启停脚本）
@@ -20,7 +20,7 @@ CipherWS/
 
 | 名称 | 类型 | 职责 |
 | --- | --- | --- |
-| `frontend/` | 目录 | 前端主站，负责页面渲染与接口调用（构建产物 `dist/`） |
+| `frontend/` | 目录 | 前端工作区：`main/` 主站、`train/` 云间列车，各自构建出 `dist/` |
 | `server/` | 目录 | 后端微服务聚合工程（父 POM + 4 个模块） |
 | `deploy/` | 目录 | 本地部署脚本与说明（Windows 原生，不依赖 Docker） |
 | `docker/` | 目录 | Nacos 注册中心 / 配置中心的容器镜像与启停脚本 |
@@ -66,8 +66,11 @@ java -jar cipherws-say-service/target/cipherws-say-service-0.0.1-SNAPSHOT.jar
 java -jar cipherws-portal-service/target/cipherws-portal-service-0.0.1-SNAPSHOT.jar
 java -jar cipherws-gateway/target/cipherws-gateway-0.0.1-SNAPSHOT.jar
 
-# 3) 前端开发
-cd ../frontend && npm install && npm run dev
+# 3) 前端开发（两个站点各自独立，命令统一在 frontend/ 下执行）
+cd ../frontend
+npm run install:all        # 给 main 与 train 各装一次依赖
+npm run dev:main           # 主站   → http://127.0.0.1:8000
+npm run dev:train          # 列车站 → http://127.0.0.1:3000
 ```
 
 验证：`curl http://127.0.0.1:8080/say/saying?id=1`
@@ -86,6 +89,7 @@ cd ../frontend && npm install && npm run dev
 
 | 文档 | 内容 |
 | --- | --- |
+| [docs/2026-10-10/前端双站点结构.md](docs/2026-10-10/前端双站点结构.md) | 前端 `main/` + `train/` 双站点结构、命令速查、nginx 双 server 块与迁移副作用 |
 | [docs/2026-10-5/本地部署说明.md](docs/2026-10-5/本地部署说明.md) | Windows 本地部署：项目内 JDK/Nacos、启停脚本、鉴权说明 |
 | [docs/2026-10-5/项目本地工具链.md](docs/2026-10-5/项目本地工具链.md) | 项目内 JDK 17 工具链：安装脚本与用法 |
 | [docs/2026-10-5/音频资源说明.md](docs/2026-10-5/音频资源说明.md) | 音频为何移出版本库、放在哪、如何生效 |

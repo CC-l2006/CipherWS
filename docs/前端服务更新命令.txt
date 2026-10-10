@@ -1,9 +1,25 @@
-cd /opt/cipherws
+# CipherWS 前端更新（服务器：/opt/cipherws）
 
+cd /opt/cipherws
 git pull
 
 cd frontend
 
+# 仅当某个子项目的 package.json 有变动时才需要
+npm run install:all
+
+# 依次构建 main（→ main/dist）与 train（→ train/dist）
 npm run build
 
-sudo systemctl restart cipherws-web
+# ---- 主站：重启 node（nginx 的 location / 反代的就是这个 8000）----
+sudo systemctl restart cipherws-web-main
+
+# ---- 列车站：nginx 直接托管 train/dist，构建完即生效，不需要重启任何服务 ----
+
+# ---- 只有改了 nginx 配置才需要执行下面两行 ----
+sudo cp /opt/cipherws/deploy/nginx/cipherws.conf /etc/nginx/conf.d/cipherws.conf
+sudo nginx -t && sudo systemctl reload nginx
+
+# 只更新其中一个站点时：
+#   npm run build:main    → 只重建主站（需重启 cipherws-web-main）
+#   npm run build:train   → 只重建云间列车（无需重启）

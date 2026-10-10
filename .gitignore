@@ -1,6 +1,8 @@
 # ===== CipherWS .gitignore =====
 # 仓库结构（前后端同仓）：
-#   frontend/  Vue3 + Vite，依赖与产物由 package.json 还原
+#   frontend/  前端工作区：main/（主站）+ train/（云间列车）两个独立的 Vue3 + Vite
+#              工程，roots 互不相关，各自的依赖与产物由各自的 package.json 还原；
+#              根目录只放编排用 package.json、server.js 与 nginx 配置
 #   server/    Spring Boot + Maven（Maven 根目录就在 server/ 这一层），
 #              依赖与产物由 pom.xml 还原
 #   deploy/    部署脚本/配置
@@ -51,12 +53,19 @@ dist-ssr/
 .vite/
 *.tsbuildinfo
 
+# 云间列车的着色器参考素材（blue_noise.png 约 4 MB + 一份来源说明）：
+#   只是开发时对着调的参考资料，着色器本身不加载它（源码里没有任何 _ref 引用），
+#   构建产物也用不到，因此不入库。要保留就删掉这一行。
+frontend/train/_ref/
+
 # 包管理器锁文件与状态：
-#   项目实际使用 npm，frontend/package-lock.json 已入库并保留。
+#   项目实际使用 npm，各子项目的 package-lock.json 已入库并保留
+#   （frontend/main/package-lock.json、frontend/train/package-lock.json）。
 #   下面两个 pnpm 文件是误用 pnpm 时生成的，不参与构建，故排除。
+#   用 **/ 而不是写死路径，这样将来加第三个子项目也不用改这里。
 #   若日后统一改用 pnpm，请改为忽略 package-lock.json 并保留 pnpm-lock.yaml。
-frontend/pnpm-lock.yaml
-frontend/pnpm-workspace.yaml
+**/pnpm-lock.yaml
+**/pnpm-workspace.yaml
 
 # ---------- 后端：server/（Spring Boot + Maven）----------
 # Maven 编译产物（server/target/）
@@ -87,9 +96,11 @@ logs/
 # 本地/部署专用的环境变量文件一律不入库：其中包含真实后端地址（公网 IP / 内网穿透域名）。
 # 注意：只写 .env 是不够的 —— 它只能匹配名为「.env」的文件，
 #       匹配不到 .env.development / .env.production，必须写成 .env*。
-# 模板保留入库：frontend/.env.example（不含真实地址，新人照抄即可）。
+# 模板保留入库：frontend/main/.env.example（不含真实地址，新人照抄即可）。
+#   注意「!.env.example」里没有斜杠，所以在任意层级都生效 ——
+#   frontend/main/.env.example 与将来 frontend/train/.env.example 都会入库。
 # 如果之前已经跟踪过这些文件，需额外执行一次：
-#   git rm --cached frontend/.env.development frontend/.env.production
+#   git rm --cached frontend/main/.env.development frontend/main/.env.production
 .env*
 !.env.example
 

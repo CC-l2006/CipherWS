@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8" /><title>probe</title></head>
+<body>
+<script type="module">
+import frag from '/src/shaders/cloudtrain.frag?raw';
+const Q = new URLSearchParams(location.search);
+const vert = `#version 300 es
+precision highp float;
+layout(location = 0) in vec2 aPosition;
+void main() { gl_Position = vec4(aPosition, 0.0, 1.0); }`;
+const W = 800, H = 450;
+const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+document.body.appendChild(cv); cv.style.cssText='position:fixed;top:0;left:0;z-index:9999;width:800px;height:450px;';
+const gl = cv.getContext('webgl2');
+if (!gl) { window.__grid='NO_GL'; throw new Error('no gl'); }
+function comp(t,s){const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error('compile: '+gl.getShaderInfoLog(sh));return sh;}
+let vs,fs;
+try{vs=comp(gl.VERTEX_SHADER,vert);}catch(e){window.__grid='VERTERR '+e.message;throw e;}
+try{fs=comp(gl.FRAGMENT_SHADER,frag);}catch(e){window.__grid='FRAGERR '+e.message;throw e;}
+const p=gl.createProgram();gl.attachShader(p,vs);gl.attachShader(p,fs);gl.linkProgram(p);
+if(!gl.getProgramParameter(p,gl.LINK_STATUS)){window.__grid='LINKERR '+gl.getProgramInfoLog(p);throw new Error('link');}
+gl.useProgram(p);
+const vbo=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,vbo);
+gl.bufferData(gl.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),gl.STATIC_DRAW);
+gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,2,gl.FLOAT,false,0,0);
+const U=n=>gl.getUniformLocation(p,n);
+gl.uniform2f(U('uResolution'),W,H);
+gl.uniform1f(U('uTime'),parseFloat(Q.get('t')||'6'));
+gl.uniform1f(U('uOpeningDur'),parseFloat(Q.get('od')||'3'));
+gl.uniform1f(U('uSpeed'),parseFloat(Q.get('speed')||'1'));
+gl.uniform1f(U('uUndulation'),parseFloat(Q.get('und')||'1'));
+gl.uniform1f(U('uNoiseDetail'),parseFloat(Q.get('detail')||'6'));
+gl.uniform1f(U('uExposure'),parseFloat(Q.get('exp')||'1'));
+gl.uniform1f(U('uZoom'),parseFloat(Q.get('zoom')||'1'));
+gl.uniform2f(U('uMouse'),-1,-1);
+gl.viewport(0,0,W,H);gl.drawArrays(gl.TRIANGLES,0,6);
+const px=new Uint8Array(W*H*4);gl.readPixels(0,0,W,H,gl.RGBA,gl.UNSIGNED_BYTE,px);
+const ROWS=26,COLS=64;const rows=[];
+for(let r=0;r<ROWS;r++){let row='';const py=H-1-Math.floor((r+0.5)*H/ROWS);
+ for(let c=0;c<COLS;c++){const px0=Math.floor((c+0.5)*W/COLS);const i=(py*W+px0)*4;
+  const R=px[i]/255,G=px[i+1]/255,B=px[i+2]/255;const lum=0.2126*R+0.7152*G+0.0722*B;
+  let ch=' ';if(lum>0.13){if(R>0.80&&G>0.80&&B>0.78)ch='S';else if(R>0.26&&G>0.05&&G<0.55&&B>0.05&&B<0.55&&R>G&&R>B)ch='T';else if(B>R&&B>0.72&&R<0.75)ch='B';else if(R>0.5&&G>0.25&&G<0.9&&B<G)ch='C';else ch='.';}
+  row+=ch;}
+ rows.push(row);}
+window.__grid='[speed='+(Q.get('speed')||'1')+' und='+(Q.get('und')||'1')+' detail='+(Q.get('detail')||'6')+']\n'+rows.join('\n');
+</script>
+</body>
+</html>

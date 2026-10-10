@@ -1,0 +1,19 @@
+{
+  "name": "cipherws-train",
+  "description": "云间列车 · Up in the CloudSea —— WebGL2 着色器演示页（cipherws 前端工作区子项目）",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vue": "^3.5.13"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.2.4",
+    "vite": "^6.3.5"
+  }
+}
