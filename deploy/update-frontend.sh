@@ -420,7 +420,15 @@ if [[ "$DO_RESTART" -eq 1 && -f "$REPO_DIR/$NGINX_SRC_REL" ]]; then
         warn "之前没有该配置文件，已删除，线上服务不受影响"
       fi
       rm -f "$BACKUP"
-      die "nginx 配置无效，未加载。请修好 $NGINX_SRC_REL 后重试"
+      warn "上面 nginx -t 的输出里有具体原因，最常见的是证书文件缺失："
+      warn "  配置文件引用了 /etc/nginx/ssl/cipherws.icu.pem 与 .key，"
+      warn "  这两个文件不存在时 nginx 拒绝加载整份配置。"
+      warn "  核对：sudo ls -l /etc/nginx/ssl/"
+      warn "  证书与私钥必须配对："
+      warn "    sudo openssl x509 -noout -pubkey -in /etc/nginx/ssl/cipherws.icu.pem | openssl md5"
+      warn "    sudo openssl pkey  -noout -pubout -in /etc/nginx/ssl/cipherws.icu.key | openssl md5"
+      warn "注意：前端构建与主站重启已经完成，只是 nginx 配置保持原样没有生效。"
+      die "nginx 配置无效，未加载。请修好 $NGINX_SRC_REL 或证书后重试"
     fi
 
     rm -f "$BACKUP"
