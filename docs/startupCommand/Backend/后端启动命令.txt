@@ -1,0 +1,11 @@
+# 启动整套后端（默认动作）
+powershell -NoProfile -ExecutionPolicy Bypass -File .\启动后端.ps1
+
+# 查看状态
+powershell -NoProfile -ExecutionPolicy Bypass -File .\启动后端.ps1 -Action status
+
+# 停止
+powershell -NoProfile -ExecutionPolicy Bypass -File .\启动后端.ps1 -Action stop
+
+# 重启
+powershell -NoProfile -ExecutionPolicy Bypass -File .\启动后端.ps1 -Action restart
