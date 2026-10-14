@@ -2,17 +2,21 @@
   "name": "cipherws-frontend",
   "version": "1.0.0",
   "private": true,
-  "description": "CipherWS 前端工作区：main（主站）+ train（云间列车）。两个子项目各自独立构建，由 nginx 双 server 块分别托管。本文件只做命令编排，不含任何依赖。",
+  "description": "CipherWS 前端工作区：main（主站）+ train（云间列车）+ note（笔记）。三个子项目各自独立构建，由 nginx 各自的 server 块托管。本文件只做命令编排，不含任何依赖。",
   "scripts": {
-    "install:all": "npm --prefix main install && npm --prefix train install",
+    "install:all": "npm --prefix main install && npm --prefix train install && npm --prefix note install",
     "dev:main": "npm --prefix main run dev",
     "dev:train": "npm --prefix train run dev",
-    "build": "npm run build:main && npm run build:train",
+    "dev:note": "npm --prefix note run dev",
+    "build": "npm run build:main && npm run build:train && npm run build:note",
     "build:main": "npm --prefix main run build",
     "build:train": "npm --prefix train run build",
+    "build:note": "npm --prefix note run build",
     "preview:main": "npm --prefix main run serve",
     "preview:train": "npm --prefix train run preview",
+    "preview:note": "npm --prefix note run serve",
     "serve:main": "node server.js --app main",
-    "serve:train": "node server.js --app train"
+    "serve:train": "node server.js --app train",
+    "serve:note": "node server.js --app note"
   }
 }
