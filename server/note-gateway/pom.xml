@@ -19,6 +19,14 @@
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-gateway</artifactId>
         </dependency>
+        <!-- 解析 lb://服务名 用。少了它，路由到 lb://note-user-service 会直接
+             503 Service Unavailable —— 服务明明注册在 Nacos 上也照样不通，
+             而且日志里几乎没有有用的报错，很难查。
+             （同项目的 cipherws-gateway 也引了这个，当初写 note 的 pom 时漏了） -->
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter-loadbalancer</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.alibaba.cloud</groupId>
             <artifactId>spring-cloud-starter-alibaba-nacos-discovery</artifactId>

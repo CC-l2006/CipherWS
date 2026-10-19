@@ -15,6 +15,16 @@
 
 const BASE = String(import.meta.env.VITE_API_BASE_URL || '')
 
+/**
+ * 所有接口都以 /api 开头（网关就是按这个前缀分流的）。
+ *
+ * api/index.js 里写的是业务路径（'/auth/login'、'/notes'），
+ * 前缀在这里统一拼 —— 之前这是个真 bug：路径没带 /api，
+ * mock 模式下看不出来（mock 直接按 path 匹配），
+ * 一切到真实后端就打到 /auth/login 上，Vite 返回 404 而不是接口响应。
+ */
+const API_PREFIX = '/api'
+
 export class ApiError extends Error {
   constructor(message, code) {
     super(message || '请求失败')
@@ -69,7 +79,7 @@ export async function request(path, { method = 'GET', params, body } = {}) {
   }
 
   const qs = new URLSearchParams(cleanParams).toString()
-  const url = `${BASE}${path}${qs ? `?${qs}` : ''}`
+  const url = `${BASE}${API_PREFIX}${path}${qs ? `?${qs}` : ''}`
 
   let res
   try {
@@ -96,7 +106,7 @@ export async function upload(path, file) {
 
   let res
   try {
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetch(`${BASE}${API_PREFIX}${path}`, {
       method: 'POST',
       headers: authHeader(),
       body: form
