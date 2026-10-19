@@ -45,7 +45,7 @@ import java.util.Objects;
 
 /**
  * 后台业务实现。全部走 JdbcTemplate + 预编译占位符：
- * 表名固定写在常量里（`user` / `note` / `tag` 与系统库同名，一律加反引号），
+ * 表名固定写在常量里（`note_user` / `note` / `note_tag` 与系统库同名，一律加反引号），
  * 只有值走 {@code ?}，从不拼接用户输入。
  */
 @Service
@@ -73,7 +73,7 @@ public class AdminServiceImpl implements AdminService {
             "SELECT u.`id`, u.`username`, u.`nickname`, u.`email`, u.`role`, u.`enabled`, u.`ai_quota`,"
                     + " (SELECT COUNT(*) FROM `note` n WHERE n.`user_id` = u.`id` AND n.`deleted` = 0) AS `note_count`,"
                     + " u.`created_at`";
-    private static final String SQL_USER_FROM = " FROM `user` u";
+    private static final String SQL_USER_FROM = " FROM `note_user` u";
 
     private static final String SQL_NOTE_INSPECT_SELECT =
             "SELECT n.`id`, n.`title`, n.`content`, n.`status`, n.`flagged`, n.`updated_at`,"
@@ -83,25 +83,25 @@ public class AdminServiceImpl implements AdminService {
      * 内连接会让这些行整行消失，管理员就查不到违规内容了。
      */
     private static final String SQL_NOTE_INSPECT_FROM =
-            " FROM `note` n LEFT JOIN `user` u ON u.`id` = n.`user_id`";
+            " FROM `note` n LEFT JOIN `note_user` u ON u.`id` = n.`user_id`";
 
     private static final String SQL_AI_CONFIG_SELECT =
-            "SELECT `endpoint`, `api_key`, `model`, `max_chars`, `updated_at` FROM `ai_config` WHERE `id` = 1";
+            "SELECT `endpoint`, `api_key`, `model`, `max_chars`, `updated_at` FROM `note_ai_config` WHERE `id` = 1";
 
     private static final String SQL_ANNOUNCEMENT_SELECT =
-            "SELECT `id`, `title`, `content`, `enabled`, `created_at` FROM `system_announcement`";
+            "SELECT `id`, `title`, `content`, `enabled`, `created_at` FROM `note_system_announcement`";
 
     private static final String SQL_ADMIN_LOG_SELECT =
             "SELECT l.`id`, l.`type`, l.`detail`, l.`ip`, l.`created_at`,"
                     + " COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '管理员') AS `actor_name`";
     private static final String SQL_ADMIN_LOG_FROM =
-            " FROM `admin_operation_log` l LEFT JOIN `user` u ON u.`id` = l.`admin_id`";
+            " FROM `note_admin_operation_log` l LEFT JOIN `note_user` u ON u.`id` = l.`admin_id`";
 
     private static final String SQL_USER_LOG_SELECT =
             "SELECT l.`id`, l.`type`, l.`detail`, l.`ip`, l.`created_at`,"
                     + " COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '用户') AS `actor_name`";
     private static final String SQL_USER_LOG_FROM =
-            " FROM `user_operation_log` l LEFT JOIN `user` u ON u.`id` = l.`user_id`";
+            " FROM `note_user_operation_log` l LEFT JOIN `note_user` u ON u.`id` = l.`user_id`";
 
     private static final RowMapper<UserVo> USER_VO_MAPPER = (rs, rowNum) -> new UserVo(
             rs.getLong("id"),
@@ -179,7 +179,7 @@ public class AdminServiceImpl implements AdminService {
             throw new BusinessException("不能禁用自己");
         }
         UserBrief before = findUserBrief(targetUserId);
-        jdbcTemplate.update("UPDATE `user` SET `enabled` = ? WHERE `id` = ?", next, targetUserId);
+        jdbcTemplate.update("UPDATE `note_user` SET `enabled` = ? WHERE `id` = ?", next, targetUserId);
         writeLog(adminId, next ? "启用用户" : "禁用用户",
                 "账号 " + before.username() + "，状态 " + stateText(before.enabled())
                         + " -> " + stateText(next));
@@ -196,7 +196,7 @@ public class AdminServiceImpl implements AdminService {
             throw new BusinessException("用户不存在");
         }
         UserBrief before = findUserBrief(targetUserId);
-        jdbcTemplate.update("UPDATE `user` SET `ai_quota` = ? WHERE `id` = ?", aiQuota, targetUserId);
+        jdbcTemplate.update("UPDATE `note_user` SET `ai_quota` = ? WHERE `id` = ?", aiQuota, targetUserId);
         writeLog(adminId, "重置 AI 配额",
                 "账号 " + before.username() + "，额度 " + before.aiQuota() + " -> " + aiQuota);
         return Result.ok(findUserVo(targetUserId));
@@ -283,7 +283,7 @@ public class AdminServiceImpl implements AdminService {
             // 前端读到的永远是掩码，用户不改密钥时根本不会提交这个字段，
             // 所以「空」必须解释成沿用旧密钥，而不是把密钥清空
             jdbcTemplate.update(
-                    "UPDATE `ai_config` SET `endpoint` = ?, `model` = ?, `max_chars` = ?, `updated_by` = ?"
+                    "UPDATE `note_ai_config` SET `endpoint` = ?, `model` = ?, `max_chars` = ?, `updated_by` = ?"
                             + " WHERE `id` = 1",
                     endpoint, model, maxChars, adminId);
         } else {
@@ -291,7 +291,7 @@ public class AdminServiceImpl implements AdminService {
                 throw new BusinessException("接口密钥不能超过 255 个字符");
             }
             jdbcTemplate.update(
-                    "UPDATE `ai_config` SET `endpoint` = ?, `model` = ?, `max_chars` = ?, `api_key` = ?,"
+                    "UPDATE `note_ai_config` SET `endpoint` = ?, `model` = ?, `max_chars` = ?, `api_key` = ?,"
                             + " `updated_by` = ? WHERE `id` = 1",
                     endpoint, model, maxChars, apiKey, adminId);
         }
@@ -307,7 +307,7 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     public Result listAnnouncements(Integer page, Integer size) {
-        long total = count("SELECT COUNT(*) FROM `system_announcement`", List.of());
+        long total = count("SELECT COUNT(*) FROM `note_system_announcement`", List.of());
         List<Object> pageArgs = withPaging(List.of(), page, size);
         List<AnnouncementVo> rows = jdbcTemplate.query(
                 SQL_ANNOUNCEMENT_SELECT + " ORDER BY `created_at` DESC, `id` DESC LIMIT ? OFFSET ?",
@@ -329,7 +329,7 @@ public class AdminServiceImpl implements AdminService {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO `system_announcement` (`title`, `content`, `admin_id`, `enabled`)"
+                    "INSERT INTO `note_system_announcement` (`title`, `content`, `admin_id`, `enabled`)"
                             + " VALUES (?, ?, ?, ?)",
                     Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, title);
@@ -365,7 +365,7 @@ public class AdminServiceImpl implements AdminService {
                 ? before.enabled() : request.enabled().booleanValue();
 
         jdbcTemplate.update(
-                "UPDATE `system_announcement` SET `title` = ?, `content` = ?, `enabled` = ? WHERE `id` = ?",
+                "UPDATE `note_system_announcement` SET `title` = ?, `content` = ?, `enabled` = ? WHERE `id` = ?",
                 title, content, enabled, id);
         writeLog(adminId, "编辑公告",
                 "编辑《" + title + "》" + (before.enabled() == enabled ? "" : (enabled ? "，已启用" : "，已下线")));
@@ -382,7 +382,7 @@ public class AdminServiceImpl implements AdminService {
         if (before == null) {
             throw new BusinessException("公告不存在");
         }
-        jdbcTemplate.update("DELETE FROM `system_announcement` WHERE `id` = ?", id);
+        jdbcTemplate.update("DELETE FROM `note_system_announcement` WHERE `id` = ?", id);
         writeLog(adminId, "删除公告", "删除《" + before.title() + "》");
         return Result.ok(true);
     }
@@ -442,7 +442,7 @@ public class AdminServiceImpl implements AdminService {
     public Result stats() {
         LocalDate start = LocalDate.now().minusDays(6);
         List<Map<String, Object>> grouped = jdbcTemplate.queryForList(
-                "SELECT DATE(`created_at`) AS `day`, COUNT(*) AS `calls` FROM `ai_summary_record`"
+                "SELECT DATE(`created_at`) AS `day`, COUNT(*) AS `calls` FROM `note_ai_summary_record`"
                         + " WHERE `created_at` >= ? GROUP BY DATE(`created_at`)",
                 Timestamp.valueOf(start.atStartOfDay()));
         Map<String, Long> byDay = new HashMap<>();
@@ -465,7 +465,7 @@ public class AdminServiceImpl implements AdminService {
                 "SELECT r.`user_id` AS `user_id`,"
                         + " COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '未知用户') AS `name`,"
                         + " COUNT(*) AS `calls`"
-                        + " FROM `ai_summary_record` r LEFT JOIN `user` u ON u.`id` = r.`user_id`"
+                        + " FROM `note_ai_summary_record` r LEFT JOIN `note_user` u ON u.`id` = r.`user_id`"
                         + " GROUP BY r.`user_id`, u.`nickname`, u.`username`"
                         + " ORDER BY `calls` DESC, r.`user_id` ASC LIMIT 5",
                 (rs, rowNum) -> new TopUserVo(
@@ -473,9 +473,9 @@ public class AdminServiceImpl implements AdminService {
 
         // 四个总量都是一次性的，用子查询合成一行，省三次往返
         TotalsVo summed = jdbcTemplate.queryForObject(
-                "SELECT (SELECT COUNT(*) FROM `user`) AS `users`,"
+                "SELECT (SELECT COUNT(*) FROM `note_user`) AS `users`,"
                         + " (SELECT COUNT(*) FROM `note` WHERE `deleted` = 0) AS `notes`,"
-                        + " (SELECT COUNT(*) FROM `ai_summary_record`) AS `ai_calls`,"
+                        + " (SELECT COUNT(*) FROM `note_ai_summary_record`) AS `ai_calls`,"
                         + " (SELECT COUNT(*) FROM `note` WHERE `flagged` = 1 AND `deleted` = 0)"
                         + " AS `flagged_notes`",
                 (rs, rowNum) -> new TotalsVo(
@@ -501,7 +501,7 @@ public class AdminServiceImpl implements AdminService {
 
     private UserBrief findUserBrief(Long userId) {
         List<UserBrief> rows = jdbcTemplate.query(
-                "SELECT `username`, `enabled`, `ai_quota` FROM `user` WHERE `id` = ?",
+                "SELECT `username`, `enabled`, `ai_quota` FROM `note_user` WHERE `id` = ?",
                 (rs, rowNum) -> new UserBrief(
                         rs.getString("username"), rs.getBoolean("enabled"), rs.getInt("ai_quota")),
                 userId);
@@ -567,7 +567,7 @@ public class AdminServiceImpl implements AdminService {
         String placeholders = String.join(", ", Collections.nCopies(noteIds.size(), "?"));
         List<TagRow> rows = jdbcTemplate.query(
                 "SELECT r.`note_id`, t.`id`, t.`name` FROM `note_tag_rel` r"
-                        + " JOIN `tag` t ON t.`id` = r.`tag_id`"
+                        + " JOIN `note_tag` t ON t.`id` = r.`tag_id`"
                         + " WHERE r.`note_id` IN (" + placeholders + ") ORDER BY t.`name` ASC",
                 (rs, rowNum) -> new TagRow(rs.getLong("note_id"),
                         new TagVo(rs.getLong("id"), rs.getString("name"))),
@@ -622,7 +622,7 @@ public class AdminServiceImpl implements AdminService {
             return;
         }
         jdbcTemplate.update(
-                "INSERT INTO `admin_operation_log` (`admin_id`, `type`, `detail`, `ip`) VALUES (?, ?, ?, ?)",
+                "INSERT INTO `note_admin_operation_log` (`admin_id`, `type`, `detail`, `ip`) VALUES (?, ?, ?, ?)",
                 adminId, type, clip(detail, DETAIL_MAX), clip(currentIp(), IP_MAX));
     }
 

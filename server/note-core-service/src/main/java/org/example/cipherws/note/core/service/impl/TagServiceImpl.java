@@ -37,7 +37,7 @@ public class TagServiceImpl implements TagService {
     private static final String TAG_SELECT = "SELECT t.`id`, t.`name`, t.`created_at`,"
             + " (SELECT COUNT(*) FROM `note_tag_rel` r JOIN `note` n ON n.`id` = r.`note_id`"
             + " WHERE r.`tag_id` = t.`id` AND n.`user_id` = t.`user_id` AND n.`deleted` = 0) AS `note_count`"
-            + " FROM `tag` t";
+            + " FROM `note_tag` t";
 
     @Resource
     private JdbcTemplate jdbcTemplate;
@@ -54,7 +54,7 @@ public class TagServiceImpl implements TagService {
     public Result createTag(long userId, TagSaveRequest request) {
         String name = normalizeName(request.name());
         try {
-            jdbcTemplate.update("INSERT INTO `tag` (`user_id`, `name`) VALUES (?, ?)", userId, name);
+            jdbcTemplate.update("INSERT INTO `note_tag` (`user_id`, `name`) VALUES (?, ?)", userId, name);
         } catch (DuplicateKeyException e) {
             // 唯一键就是 (user_id, name)：交给数据库判定重名，先查再插在并发下会两边都插进去
             throw new BusinessException("同名标签已存在");
@@ -69,7 +69,7 @@ public class TagServiceImpl implements TagService {
         requireOwnedTag(userId, tagId);
         String name = normalizeName(request.name());
         try {
-            jdbcTemplate.update("UPDATE `tag` SET `name` = ? WHERE `id` = ? AND `user_id` = ?",
+            jdbcTemplate.update("UPDATE `note_tag` SET `name` = ? WHERE `id` = ? AND `user_id` = ?",
                     name, tagId, userId);
         } catch (DuplicateKeyException e) {
             throw new BusinessException("同名标签已存在");
@@ -84,14 +84,14 @@ public class TagServiceImpl implements TagService {
         // 需求 4.5.3：删标签只解除关联，绝不删笔记。
         // note_tag_rel 的两个外键都是 ON DELETE CASCADE，删 tag 时关联行自动清掉，
         // 所以这里只需要删 tag 自己 —— 反过来从关联行去删 note 是绝对不能做的。
-        jdbcTemplate.update("DELETE FROM `tag` WHERE `id` = ? AND `user_id` = ?", tagId, userId);
+        jdbcTemplate.update("DELETE FROM `note_tag` WHERE `id` = ? AND `user_id` = ?", tagId, userId);
         return Result.ok(true);
     }
 
     /** 删改前的归属校验：别人家的 tagId 一律当作不存在 */
     private void requireOwnedTag(long userId, long tagId) {
         Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM `tag` WHERE `id` = ? AND `user_id` = ?", Long.class, tagId, userId);
+                "SELECT COUNT(*) FROM `note_tag` WHERE `id` = ? AND `user_id` = ?", Long.class, tagId, userId);
         if (count == null || count == 0) {
             throw new BusinessException("标签不存在");
         }

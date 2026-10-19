@@ -100,7 +100,7 @@ public class UserServiceImpl implements UserService {
 
         try {
             jdbc.update("""
-                    INSERT INTO `user` (username, password, role, enabled, email, nickname, ai_quota)
+                    INSERT INTO `note_user` (username, password, role, enabled, email, nickname, ai_quota)
                     VALUES (?, ?, 'user', 1, ?, ?, 5)
                     """, name, passwordEncoder.encode(password), mail, name);
         } catch (DuplicateKeyException e) {
@@ -109,7 +109,7 @@ public class UserServiceImpl implements UserService {
         }
 
         List<UserVo> created = jdbc.query(
-                "SELECT * FROM `user` WHERE username = ?", USER_VO, name);
+                "SELECT * FROM `note_user` WHERE username = ?", USER_VO, name);
         return created.get(0);
     }
 
@@ -117,7 +117,7 @@ public class UserServiceImpl implements UserService {
     public LoginRes login(String username, String password) {
         String name = username == null ? "" : username.trim();
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT id, password, role, enabled FROM `user` WHERE username = ?", name);
+                "SELECT id, password, role, enabled FROM `note_user` WHERE username = ?", name);
         if (rows.isEmpty()) {
             // 不区分「账号不存在」与「密码错误」，避免被用来枚举账号
             throw new BusinessException("账号或密码不正确");
@@ -181,7 +181,7 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("验证码不正确");
         }
 
-        int updated = jdbc.update("UPDATE `user` SET password = ? WHERE email = ?",
+        int updated = jdbc.update("UPDATE `note_user` SET password = ? WHERE email = ?",
                 passwordEncoder.encode(newPassword), mail);
         if (updated == 0) {
             throw new BusinessException("该邮箱未注册");
@@ -192,7 +192,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserVo profile(long userId) {
-        List<UserVo> rows = jdbc.query("SELECT * FROM `user` WHERE id = ?", USER_VO, userId);
+        List<UserVo> rows = jdbc.query("SELECT * FROM `note_user` WHERE id = ?", USER_VO, userId);
         if (rows.isEmpty()) {
             throw new BusinessException("用户不存在");
         }
@@ -222,7 +222,7 @@ public class UserServiceImpl implements UserService {
         }
 
         jdbc.update("""
-                UPDATE `user` SET nickname = ?, email = ?, bio = ?, avatar = ? WHERE id = ?
+                UPDATE `note_user` SET nickname = ?, email = ?, bio = ?, avatar = ? WHERE id = ?
                 """, name, mail, intro, pic, userId);
         return profile(userId);
     }
@@ -234,7 +234,7 @@ public class UserServiceImpl implements UserService {
         }
 
         String stored = jdbc.queryForObject(
-                "SELECT password FROM `user` WHERE id = ?", String.class, userId);
+                "SELECT password FROM `note_user` WHERE id = ?", String.class, userId);
         if (stored == null || !passwordEncoder.matches(oldPassword == null ? "" : oldPassword, stored)) {
             throw new BusinessException("原密码不正确");
         }
@@ -242,7 +242,7 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("新密码不能与原密码相同");
         }
 
-        jdbc.update("UPDATE `user` SET password = ? WHERE id = ?",
+        jdbc.update("UPDATE `note_user` SET password = ? WHERE id = ?",
                 passwordEncoder.encode(newPassword), userId);
     }
 
@@ -250,13 +250,13 @@ public class UserServiceImpl implements UserService {
 
     private int countByUsername(String username) {
         Integer n = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM `user` WHERE username = ?", Integer.class, username);
+                "SELECT COUNT(*) FROM `note_user` WHERE username = ?", Integer.class, username);
         return n == null ? 0 : n;
     }
 
     private int countByEmail(String email) {
         Integer n = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM `user` WHERE email = ?", Integer.class, email);
+                "SELECT COUNT(*) FROM `note_user` WHERE email = ?", Integer.class, email);
         return n == null ? 0 : n;
     }
 
@@ -264,7 +264,7 @@ public class UserServiceImpl implements UserService {
     private void writeUserLog(long userId, String type, String detail) {
         try {
             jdbc.update("""
-                    INSERT INTO user_operation_log (user_id, type, detail, ip) VALUES (?, ?, ?, ?)
+                    INSERT INTO note_user_operation_log (user_id, type, detail, ip) VALUES (?, ?, ?, ?)
                     """, userId, type, detail, "");
         } catch (Exception ignored) {
             // 日志表不可用不应该让用户登不上

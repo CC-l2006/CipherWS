@@ -71,19 +71,19 @@ public class AiServiceImpl implements AiService {
 
         // 原子扣减：把「额度 > 0」写进 WHERE，避免并发下扣成负数
         int deducted = jdbc.update(
-                "UPDATE `user` SET ai_quota = ai_quota - 1 WHERE id = ? AND ai_quota > 0", userId);
+                "UPDATE `note_user` SET ai_quota = ai_quota - 1 WHERE id = ? AND ai_quota > 0", userId);
         if (deducted == 0) {
             throw new BusinessException("AI 额度已用完，请联系管理员分配");
         }
 
         String snippet = input.length() > 500 ? input.substring(0, 500) : input;
         jdbc.update("""
-                INSERT INTO ai_summary_record (note_id, user_id, source_snippet, summary, quota_cost)
+                INSERT INTO note_ai_summary_record (note_id, user_id, source_snippet, summary, quota_cost)
                 VALUES (?, ?, ?, ?, 1)
                 """, noteId, userId, snippet, summary);
 
         Integer quotaLeft = jdbc.queryForObject(
-                "SELECT ai_quota FROM `user` WHERE id = ?", Integer.class, userId);
+                "SELECT ai_quota FROM `note_user` WHERE id = ?", Integer.class, userId);
         Long recordId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
 
         writeLog(userId, "AI 总结", "对《" + title + "》调用 AI 总结，消耗 1 次额度");
@@ -99,8 +99,8 @@ public class AiServiceImpl implements AiService {
         return jdbc.query("""
                 SELECT r.id, r.note_id, r.summary, r.source_snippet, r.quota_cost, r.created_at,
                        u.ai_quota
-                FROM ai_summary_record r
-                JOIN `user` u ON u.id = r.user_id
+                FROM note_ai_summary_record r
+                JOIN `note_user` u ON u.id = r.user_id
                 WHERE r.user_id = ? AND r.note_id = ?
                 ORDER BY r.created_at DESC
                 """, (rs, i) -> new SummaryVo(
@@ -132,7 +132,7 @@ public class AiServiceImpl implements AiService {
 
     private Map<String, Object> aiConfig() {
         List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT endpoint, api_key, model, max_chars FROM ai_config WHERE id = 1");
+                "SELECT endpoint, api_key, model, max_chars FROM note_ai_config WHERE id = 1");
         if (rows.isEmpty()) {
             throw new BusinessException("AI 参数未初始化，请先导入 note-schema.sql");
         }
@@ -188,7 +188,7 @@ public class AiServiceImpl implements AiService {
 
     private void writeLog(long userId, String type, String detail) {
         try {
-            jdbc.update("INSERT INTO user_operation_log (user_id, type, detail, ip) VALUES (?, ?, ?, ?)",
+            jdbc.update("INSERT INTO note_user_operation_log (user_id, type, detail, ip) VALUES (?, ?, ?, ?)",
                     userId, type, detail, "");
         } catch (Exception ignored) {
             // 日志失败不影响总结结果

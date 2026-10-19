@@ -99,7 +99,7 @@ public class NoteServiceImpl implements NoteService {
     public Result clearTrash(long userId) {
         // ai_summary_record 没有指向 note 的外键，不先手动删就会留下永远打不开的孤儿摘要，
         // 管理员统计还会把它们算进 AI 调用次数里。
-        jdbcTemplate.update("DELETE s FROM `ai_summary_record` s"
+        jdbcTemplate.update("DELETE s FROM `note_ai_summary_record` s"
                 + " JOIN `note` n ON n.`id` = s.`note_id`"
                 + " WHERE n.`user_id` = ? AND n.`deleted` = 1 AND s.`user_id` = ?", userId, userId);
         // note_tag_rel 的两个外键都是 ON DELETE CASCADE，关联行随笔记一起消失，不用手删
@@ -112,7 +112,7 @@ public class NoteServiceImpl implements NoteService {
         NoteVo note = requireNoteVo(userId, noteId);
         // 总结历史同样带 user_id：这张表里 note_id 与 user_id 是两列，两个条件都写上才严密
         List<SummaryVo> summaries = jdbcTemplate.query(
-                "SELECT `id`, `summary`, `created_at` FROM `ai_summary_record`"
+                "SELECT `id`, `summary`, `created_at` FROM `note_ai_summary_record`"
                         + " WHERE `note_id` = ? AND `user_id` = ?"
                         + " ORDER BY `created_at` DESC, `id` DESC",
                 (rs, rowNum) -> new SummaryVo(rs.getLong("id"), rs.getString("summary"),
@@ -188,7 +188,7 @@ public class NoteServiceImpl implements NoteService {
         requireNoteVo(userId, noteId);
         if (hard) {
             // 永久删除：摘要没有外键约束，必须手动清；关联行由外键级联
-            jdbcTemplate.update("DELETE FROM `ai_summary_record` WHERE `note_id` = ? AND `user_id` = ?",
+            jdbcTemplate.update("DELETE FROM `note_ai_summary_record` WHERE `note_id` = ? AND `user_id` = ?",
                     noteId, userId);
             jdbcTemplate.update("DELETE FROM `note` WHERE `id` = ? AND `user_id` = ?", noteId, userId);
         } else {
@@ -272,7 +272,7 @@ public class NoteServiceImpl implements NoteService {
                 continue;
             }
             jdbcTemplate.update("INSERT INTO `note_tag_rel` (`note_id`, `tag_id`)"
-                            + " SELECT ?, `id` FROM `tag` WHERE `id` = ? AND `user_id` = ?",
+                            + " SELECT ?, `id` FROM `note_tag` WHERE `id` = ? AND `user_id` = ?",
                     noteId, tagId, userId);
         }
     }
@@ -292,7 +292,7 @@ public class NoteServiceImpl implements NoteService {
         List<Object> args = new ArrayList<>(noteIds);
         args.add(userId);
         String sql = "SELECT r.`note_id`, t.`id`, t.`name` FROM `note_tag_rel` r"
-                + " JOIN `tag` t ON t.`id` = r.`tag_id`"
+                + " JOIN `note_tag` t ON t.`id` = r.`tag_id`"
                 + " WHERE r.`note_id` IN (" + placeholders + ") AND t.`user_id` = ?";
         RowCallbackHandler collector = rs -> grouped
                 .computeIfAbsent(rs.getLong("note_id"), key -> new ArrayList<>())

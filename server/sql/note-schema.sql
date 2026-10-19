@@ -15,7 +15,10 @@
 -- Windows 上默认 lower_case_table_names=1，库名会被强制转成小写 cipherws ——
 -- 同一份脚本两端都能跑，但跨平台迁移时别被大小写误导。
 --
--- 注意：表名 user / note / tag 是需求文档指定的。`user` 虽然不是 MySQL 8 的
+-- 命名约定：所有表统一以模块名 note 开头（note_user / note_tag / note_ai_* …）。
+-- 其中 note 与 note_tag_rel 本身已以 note 开头，不再叠加成 note_note。
+-- 好处是同一个库里能容纳多套系统（cipherws 主站、train、note）而互不撞名。
+---- 注意：表名 user / note / tag 是需求文档指定的。`note_user` 虽然不是 MySQL 8 的
 -- 保留字，但它和 mysql 系统库的 user 表同名，所以下面一律用反引号包裹，
 -- 后续所有 SQL 也要这么写。
 -- =============================================================================
@@ -27,11 +30,11 @@ USE `CipherWS`;
 
 
 -- -----------------------------------------------------------------------------
--- 1. user 用户表
+-- 1. note_user 用户表
 --    需求 6.2.1：密码必须不可逆加密存储，password 列存 BCrypt 摘要（60 字符），
 --    绝不放明文。这里给 100 长度给未来换 Argon2 留余量。
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `user` (
+CREATE TABLE IF NOT EXISTS `note_user` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '用户 ID',
     `username`    VARCHAR(20)  NOT NULL COMMENT '账号，3-20 位字母数字下划线',
     `password`    VARCHAR(100) NOT NULL COMMENT 'BCrypt 密码摘要，禁止明文',
@@ -50,7 +53,7 @@ CREATE TABLE IF NOT EXISTS `user` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '用户表';
 
 -- -----------------------------------------------------------------------------
--- 2. note 笔记表
+-- 2. note 笔记表（本身已以 note 开头，不叠加前缀）
 --    deleted=1 表示在回收站（需求 4.3.7：支持回收站与永久删除两种模式）。
 --    flagged=1 是管理员巡检标记的违规笔记（需求 4.6.2：管理员只标记，不改正文）。
 --    正文用 MEDIUMTEXT：一篇笔记可能很长，TEXT 的 64KB 不够。
@@ -74,11 +77,11 @@ CREATE TABLE IF NOT EXISTS `note` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '笔记表';
 
 -- -----------------------------------------------------------------------------
--- 3. tag 标签表
+-- 3. note_tag 标签表
 --    需求 7.4：标签属于用户私有，不同用户同名标签互不干扰
 --    → 唯一约束必须是 (user_id, name) 而不是 name 单列。
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `tag` (
+CREATE TABLE IF NOT EXISTS `note_tag` (
     `id`         BIGINT      NOT NULL AUTO_INCREMENT,
     `user_id`    BIGINT      NOT NULL COMMENT '所属用户',
     `name`       VARCHAR(12) NOT NULL COMMENT '标签名，最多 12 字符',
@@ -98,15 +101,15 @@ CREATE TABLE IF NOT EXISTS `note_tag_rel` (
     PRIMARY KEY (`note_id`, `tag_id`),
     KEY `idx_rel_tag` (`tag_id`),
     CONSTRAINT `fk_rel_note` FOREIGN KEY (`note_id`) REFERENCES `note` (`id`) ON DELETE CASCADE,
-    CONSTRAINT `fk_rel_tag` FOREIGN KEY (`tag_id`) REFERENCES `tag` (`id`) ON DELETE CASCADE
+    CONSTRAINT `fk_rel_tag` FOREIGN KEY (`tag_id`) REFERENCES `note_tag` (`id`) ON DELETE CASCADE
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '笔记标签关联表';
 
 -- -----------------------------------------------------------------------------
--- 5. ai_summary_record AI 总结记录表
+-- 5. note_ai_summary_record AI 总结记录表
 --    需求 4.4.5：同一笔记可多次总结，产生多条记录 → 不加唯一约束。
 --    source_snippet 存提交给模型的原文片段，便于事后核对摘要是否失真。
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `ai_summary_record` (
+CREATE TABLE IF NOT EXISTS `note_ai_summary_record` (
     `id`             BIGINT      NOT NULL AUTO_INCREMENT,
     `note_id`        BIGINT      NOT NULL,
     `user_id`        BIGINT      NOT NULL,
@@ -120,10 +123,10 @@ CREATE TABLE IF NOT EXISTS `ai_summary_record` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'AI 总结记录表';
 
 -- -----------------------------------------------------------------------------
--- 6. system_announcement 系统公告表
+-- 6. note_system_announcement 系统公告表
 --    enabled=0 的公告用户看不到（需求 4.6.4：用户登录后可查看公告）。
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `system_announcement` (
+CREATE TABLE IF NOT EXISTS `note_system_announcement` (
     `id`         BIGINT      NOT NULL AUTO_INCREMENT,
     `title`      VARCHAR(80) NOT NULL,
     `content`    TEXT        NOT NULL,
@@ -136,11 +139,11 @@ CREATE TABLE IF NOT EXISTS `system_announcement` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '系统公告表';
 
 -- -----------------------------------------------------------------------------
--- 7. user_operation_log 用户操作日志表
+-- 7. note_user_operation_log 用户操作日志表
 --    需求 4.7.4：日志不可删除 → 服务层只提供 insert / select，不提供 delete。
 --    操作类型：登录 / 新建笔记 / 删除笔记 / AI 总结 / 恢复笔记
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `user_operation_log` (
+CREATE TABLE IF NOT EXISTS `note_user_operation_log` (
     `id`         BIGINT       NOT NULL AUTO_INCREMENT,
     `user_id`    BIGINT       NOT NULL,
     `type`       VARCHAR(32)  NOT NULL COMMENT '操作类型',
@@ -153,10 +156,10 @@ CREATE TABLE IF NOT EXISTS `user_operation_log` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '用户操作日志表';
 
 -- -----------------------------------------------------------------------------
--- 8. admin_operation_log 管理员操作日志表
+-- 8. note_admin_operation_log 管理员操作日志表
 --    操作类型：禁用用户 / 启用用户 / 重置 AI 配额 / 巡检笔记 / 修改 AI 配置 / 发布公告 …
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `admin_operation_log` (
+CREATE TABLE IF NOT EXISTS `note_admin_operation_log` (
     `id`         BIGINT       NOT NULL AUTO_INCREMENT,
     `admin_id`   BIGINT       NOT NULL,
     `type`       VARCHAR(32)  NOT NULL,
@@ -169,12 +172,12 @@ CREATE TABLE IF NOT EXISTS `admin_operation_log` (
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '管理员操作日志表';
 
 -- -----------------------------------------------------------------------------
--- 9. ai_config AI 配置表
+-- 9. note_ai_config AI 配置表
 --    需求 6.4.2：AI 接口参数后台可配置，无需改代码重启服务
 --    需求 6.2.4：密钥不在前端暴露 → 接口只回传掩码
 --    单行配置表：约定 id=1 那行生效（下面有初始化数据）。
 -- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `ai_config` (
+CREATE TABLE IF NOT EXISTS `note_ai_config` (
     `id`         BIGINT        NOT NULL AUTO_INCREMENT,
     `endpoint`   VARCHAR(255)  NOT NULL COMMENT 'OpenAI 兼容的 chat/completions 地址',
     `api_key`    VARCHAR(255)  NOT NULL DEFAULT '' COMMENT '接口密钥，禁止回传给前端',
@@ -190,30 +193,30 @@ CREATE TABLE IF NOT EXISTS `ai_config` (
 -- =============================================================================
 
 -- AI 配置：占位地址，部署后由管理员在后台改成真实接口
-INSERT INTO `ai_config` (`id`, `endpoint`, `api_key`, `model`, `max_chars`)
+INSERT INTO `note_ai_config` (`id`, `endpoint`, `api_key`, `model`, `max_chars`)
 SELECT 1, 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', '', 'qwen-plus', 1200
-WHERE NOT EXISTS (SELECT 1 FROM `ai_config` WHERE `id` = 1);
+WHERE NOT EXISTS (SELECT 1 FROM `note_ai_config` WHERE `id` = 1);
 
 -- 管理员账号：admin / admin123
 -- 密码摘要是 BCrypt（strength 10）对 "admin123" 的结果，已用
 -- BCryptPasswordEncoder.matches("admin123", 该摘要) 实测返回 true。
 -- ⚠️ 首次登录后请立刻改密码。
-INSERT INTO `user` (`username`, `password`, `role`, `enabled`, `email`, `nickname`, `bio`, `ai_quota`)
+INSERT INTO `note_user` (`username`, `password`, `role`, `enabled`, `email`, `nickname`, `bio`, `ai_quota`)
 SELECT 'admin',
        '$2a$10$92FF7YqFlVJUz8/v.orl5.YwxrH0vpsyezysBm1PpmjDBNhu8w4RK',
        'admin', 1, 'admin@cipherws.icu', '站点管理员', '负责用户审核、笔记巡检与 AI 参数配置。', 100
-WHERE NOT EXISTS (SELECT 1 FROM `user` WHERE `username` = 'admin');
+WHERE NOT EXISTS (SELECT 1 FROM `note_user` WHERE `username` = 'admin');
 
 -- 演示账号：demo / demo123（同样实测可匹配）
-INSERT INTO `user` (`username`, `password`, `role`, `enabled`, `email`, `nickname`, `bio`, `ai_quota`)
+INSERT INTO `note_user` (`username`, `password`, `role`, `enabled`, `email`, `nickname`, `bio`, `ai_quota`)
 SELECT 'demo',
        '$2a$10$Pcp3wsX/qPs3jiPDYVECc.ynQNPebioTtl5Z7rOZY6nvNsSSIlSd6',
        'user', 1, 'demo@cipherws.icu', '池禾', '毕业设计中，用这个笔记本记技术笔记和灵感。', 8
-WHERE NOT EXISTS (SELECT 1 FROM `user` WHERE `username` = 'demo');
+WHERE NOT EXISTS (SELECT 1 FROM `note_user` WHERE `username` = 'demo');
 
 -- 一条欢迎公告
-INSERT INTO `system_announcement` (`title`, `content`, `admin_id`, `enabled`)
+INSERT INTO `note_system_announcement` (`title`, `content`, `admin_id`, `enabled`)
 SELECT '笔记系统上线',
        '支持笔记编写、标签分类、回收站与 AI 智能总结。AI 总结每次消耗 1 次额度，额度可在个人资料页查看。',
-       (SELECT `id` FROM `user` WHERE `username` = 'admin' LIMIT 1), 1
-WHERE NOT EXISTS (SELECT 1 FROM `system_announcement` WHERE `title` = '笔记系统上线');
+       (SELECT `id` FROM `note_user` WHERE `username` = 'admin' LIMIT 1), 1
+WHERE NOT EXISTS (SELECT 1 FROM `note_system_announcement` WHERE `title` = '笔记系统上线');
