@@ -5,15 +5,26 @@
 -- 字符集统一 utf8mb4（笔记正文会含 emoji 与中日文，utf8 存不下），
 -- 存储引擎 InnoDB（需要事务与外键式的一致性）。
 --
--- 用法：
---   CREATE DATABASE IF NOT EXISTS cipherws_note
---     DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
---   mysql -u root -p cipherws_note < note-schema.sql
+-- 用法：本脚本**自带建库语句**，直接执行即可（可重复执行，已存在的表与初始数据会跳过）：
+--   mysql -u root -p < note-schema.sql
+-- 也可以先手工建好库、只导入表结构：
+--   mysql -u root -p CipherWS < note-schema.sql
+--
+-- 注意库名的大小写：Linux 上 MySQL 默认 lower_case_table_names=0，库名**区分大小写**，
+-- 所以建库名必须和 JDBC 连接串里的名字完全一致（本项目统一用 CipherWS）。
+-- Windows 上默认 lower_case_table_names=1，库名会被强制转成小写 cipherws ——
+-- 同一份脚本两端都能跑，但跨平台迁移时别被大小写误导。
 --
 -- 注意：表名 user / note / tag 是需求文档指定的。`user` 虽然不是 MySQL 8 的
 -- 保留字，但它和 mysql 系统库的 user 表同名，所以下面一律用反引号包裹，
 -- 后续所有 SQL 也要这么写。
 -- =============================================================================
+
+CREATE DATABASE IF NOT EXISTS `CipherWS`
+    DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+
+USE `CipherWS`;
+
 
 -- -----------------------------------------------------------------------------
 -- 1. user 用户表

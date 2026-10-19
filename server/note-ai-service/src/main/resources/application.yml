@@ -5,7 +5,7 @@ spring:
   application:
     name: note-ai-service
   datasource:
-    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/cipherws_note?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/CipherWS?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
