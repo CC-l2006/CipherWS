@@ -6,8 +6,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\fetch-nacos.ps1
 #
 # Why 3.3.0-RC specifically: the project targets Spring Cloud Alibaba 2025.0.0.0,
-# which ships nacos-client 3.0.3; the docker assets in docker/ also reference
-# nacos/nacos-server:v3.3.0-RC. Keep the server version aligned with those.
+# which ships nacos-client 3.0.3; keep the server version aligned with that client.
 $ErrorActionPreference = 'Stop'
 
 # This script lives in <project>\deploy -- go up one level for the project root.

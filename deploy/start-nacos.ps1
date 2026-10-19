@@ -13,7 +13,7 @@
 #   2. It gives a clear port table and fails loudly instead of leaving a stray
 #      window when Nacos cannot start.
 #
-# Ports (aligned with docker/run.sh in this repo):
+# Ports (the console is moved off 8080 because the main-site gateway uses it):
 #   8848  main HTTP + gRPC  -> what the microservices connect to
 #   8849  console UI        -> browser (upstream default 8080 collides with the gateway)
 #   9848  client gRPC       -> 8848 + 1000
