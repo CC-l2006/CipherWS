@@ -30,6 +30,14 @@
         <module>cipherws-say-service</module>
         <module>cipherws-portal-service</module>
         <module>cipherws-gateway</module>
+
+        <!-- ===== 笔记系统（note-*）：独立的微服务集群，端口 8083 起 ===== -->
+        <module>note-common</module>
+        <module>note-user-service</module>
+        <module>note-core-service</module>
+        <module>note-ai-service</module>
+        <module>note-admin-service</module>
+        <module>note-gateway</module>
     </modules>
 
     <properties>
@@ -63,6 +71,11 @@
             <dependency>
                 <groupId>org.example</groupId>
                 <artifactId>cipherws-common</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.example</groupId>
+                <artifactId>note-common</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>

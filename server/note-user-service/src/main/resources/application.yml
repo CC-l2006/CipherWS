@@ -1,0 +1,49 @@
+server:
+  port: ${SERVER_PORT:8084}
+
+spring:
+  application:
+    name: note-user-service
+  datasource:
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/cipherws_note?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        username: ${NACOS_USERNAME:nacos}
+        password: ${NACOS_PASSWORD:1357924680bb}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        username: ${NACOS_USERNAME:nacos}
+        password: ${NACOS_PASSWORD:1357924680bb}
+        import-check:
+          enabled: false
+
+note:
+  jwt:
+    # 必须与 note-gateway 的配置一致，否则网关验不过这里签发的 token
+    secret: ${NOTE_JWT_SECRET:cipherws-note-dev-secret-change-me-in-production-32bytes}
+    ttl-seconds: ${NOTE_JWT_TTL:7200}
+  auth:
+    # 演示开关：把验证码回传给前端，便于没有邮件服务时跑通找回密码。
+    # ⚠️ 生产环境务必设为 false，否则任何知道邮箱的人都能重置别人的密码。
+    expose-code: ${NOTE_EXPOSE_CODE:true}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    org.example.cipherws.note: INFO

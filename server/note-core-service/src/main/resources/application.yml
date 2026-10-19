@@ -1,0 +1,43 @@
+server:
+  port: ${SERVER_PORT:8085}
+
+spring:
+  application:
+    name: note-core-service
+  datasource:
+    # 与 note-schema.sql 同一个库：cipherws_note
+    url: ${DB_URL:jdbc:mysql://127.0.0.1:3306/cipherws_note?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        username: ${NACOS_USERNAME:nacos}
+        password: ${NACOS_PASSWORD:1357924680bb}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        username: ${NACOS_USERNAME:nacos}
+        password: ${NACOS_PASSWORD:1357924680bb}
+        # 本服务的配置就写在这个文件里，不从 Nacos 配置中心拉。
+        # 只要 nacos-config 在 classpath 上，Spring Cloud 默认要求必须写
+        # spring.config.import，否则启动直接报 "No spring.config.import"；
+        # 关掉这项检查，本地没起 Nacos 配置中心也能把服务拉起来。
+        # （与 note-gateway 的写法保持一致，属性名是 import-check，不是 importCheck）
+        import-check:
+          enabled: false
+
+# 业务包打 INFO 就够：JdbcTemplate 的 SQL 明细要 DEBUG，需要时再单独开
+logging:
+  level:
+    org.example.cipherws.note: INFO
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: always

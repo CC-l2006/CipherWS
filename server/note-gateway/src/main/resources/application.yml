@@ -1,0 +1,78 @@
+server:
+  port: ${SERVER_PORT:8083}
+
+spring:
+  application:
+    name: note-gateway
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        username: ${NACOS_USERNAME:nacos}
+        password: ${NACOS_PASSWORD:1357924680bb}
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:127.0.0.1:8848}
+        username: ${NACOS_USERNAME:nacos}
+        password: ${NACOS_PASSWORD:1357924680bb}
+        import-check:
+          enabled: false
+    gateway:
+      server:
+        webflux:
+          # 关掉按服务名自动映射：只走下面显式声明的路由，
+          # 免得某个服务一注册就自动暴露出去
+          discovery:
+            locator:
+              enabled: false
+          routes:
+            # 认证与用户中心
+            - id: note-user-service
+              uri: lb://note-user-service
+              predicates:
+                - Path=/api/auth/**,/api/user/**
+              filters:
+                - StripPrefix=1
+
+            # 笔记与标签
+            - id: note-core-service
+              uri: lb://note-core-service
+              predicates:
+                - Path=/api/notes/**,/api/tags/**
+              filters:
+                - StripPrefix=1
+
+            # AI 总结
+            - id: note-ai-service
+              uri: lb://note-ai-service
+              predicates:
+                - Path=/api/ai/**
+              filters:
+                - StripPrefix=1
+
+            # 后台管理与用户可见公告
+            - id: note-admin-service
+              uri: lb://note-admin-service
+              predicates:
+                - Path=/api/admin/**,/api/announcements
+              filters:
+                - StripPrefix=1
+
+# JWT 签名密钥。
+# 生产环境必须通过环境变量 NOTE_JWT_SECRET 覆盖，且四个 note 服务不共享这个密钥
+# —— 只有网关需要它来验签。
+note:
+  jwt:
+    secret: ${NOTE_JWT_SECRET:cipherws-note-dev-secret-change-me-in-production-32bytes}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,gateway
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    org.example.cipherws.note: INFO
