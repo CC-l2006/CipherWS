@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  AI 总结链路的映射。
+
+  三个约定：
+  1. 表名与列名一律加反引号 —— note 与 MySQL 的保留字/系统表名太近，
+     不加引号在不同版本上会突然报语法错；
+  2. 实体查询用 resultType 短名（Note / NoteAiConfig / NoteAiSummaryRecord），
+     短名由 application.yml 的 type-aliases-package 提供，不写全限定名；
+  3. 时间字段直接交给 MyBatis 做 java.time 转换，不在 SQL 里 DATE_FORMAT，
+     格式化只发生在 Service 出参那一刻（ISO 8601，Safari 也能解析）。
+-->
+<mapper namespace="org.example.cipherws.note.ai.mapper.AiMapper">
+
+    <!-- 归属校验 + 取正文。deleted = 1 的在回收站里，按「不存在」处理 -->
+    <select id="findActiveNoteById" resultType="Note">
+        SELECT `id`, `user_id`, `title`, `content`
+        FROM `note`
+        WHERE `id` = #{noteId}
+          AND `deleted` = 0
+    </select>
+
+    <!-- 单行配置表：约定 id = 1 那行生效 -->
+    <select id="findAiConfig" resultType="NoteAiConfig">
+        SELECT `endpoint`, `api_key`, `model`, `max_chars`
+        FROM `note_ai_config`
+        WHERE `id` = 1
+    </select>
+
+    <!--
+      原子扣减额度：条件写进 WHERE，靠数据库的行锁保证并发安全。
+      不要拆成「先 SELECT 判断 > 0 再 UPDATE」——那样两条语句之间会被别的请求插进来。
+      返回受影响行数：0 就说明额度不足或用户不存在。
+    -->
+    <update id="deductQuota">
+        UPDATE `note_user`
+        SET `ai_quota` = `ai_quota` - 1
+        WHERE `id` = #{userId}
+          AND `ai_quota` > 0
+    </update>
+
+    <select id="findAiQuota" resultType="java.lang.Integer">
+        SELECT `ai_quota` FROM `note_user` WHERE `id` = #{userId}
+    </select>
+
+    <!-- 自增主键回填到实体，省掉再查一次 LAST_INSERT_ID() -->
+    <insert id="insertSummaryRecord" parameterType="NoteAiSummaryRecord"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `note_ai_summary_record` (`note_id`, `user_id`, `source_snippet`, `summary`, `quota_cost`)
+        VALUES (#{noteId}, #{userId}, #{sourceSnippet}, #{summary}, #{quotaCost})
+    </insert>
+
+    <select id="findSummaryRecords" resultType="NoteAiSummaryRecord">
+        SELECT `id`, `note_id`, `user_id`, `source_snippet`, `summary`, `quota_cost`, `created_at`
+        FROM `note_ai_summary_record`
+        WHERE `user_id` = #{userId}
+          AND `note_id` = #{noteId}
+        ORDER BY `created_at` DESC
+    </select>
+
+    <insert id="insertUserLog">
+        INSERT INTO `note_user_operation_log` (`user_id`, `type`, `detail`, `ip`)
+        VALUES (#{userId}, #{type}, #{detail}, #{ip})
+    </insert>
+
+</mapper>

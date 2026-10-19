@@ -114,7 +114,10 @@ on('POST', /^\/auth\/register$/, ({ body }) => {
   const password = String(body?.password || '')
   const email = String(body?.email || '').trim()
 
-  if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) return fail('账号需为 3-20 位字母、数字或下划线')
+  // 与后端一致：2-20 个字符，允许中文
+  if (!/^[\u4e00-\u9fa5A-Za-z0-9_]{2,20}$/.test(username)) {
+    return fail('账号需为 2-20 个字符，可用中文、字母、数字或下划线')
+  }
   if (password.length < 6) return fail('密码至少 6 位')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('邮箱格式不正确')
   if (db.users.some((u) => u.username.toLowerCase() === username.toLowerCase())) return fail('该账号已被注册')

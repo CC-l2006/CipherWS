@@ -1,6 +1,5 @@
 package org.example.cipherws.note.admin.service.impl;
 
-import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import org.example.cipherws.note.admin.dto.AdminDtos.AiConfigRequest;
 import org.example.cipherws.note.admin.dto.AdminDtos.AiConfigVo;
@@ -14,29 +13,29 @@ import org.example.cipherws.note.admin.dto.AdminDtos.TagVo;
 import org.example.cipherws.note.admin.dto.AdminDtos.TopUserVo;
 import org.example.cipherws.note.admin.dto.AdminDtos.TotalsVo;
 import org.example.cipherws.note.admin.dto.AdminDtos.UserVo;
+import org.example.cipherws.note.admin.mapper.AdminLogMapper;
+import org.example.cipherws.note.admin.mapper.AdminMapper;
 import org.example.cipherws.note.admin.service.AdminService;
+import org.example.cipherws.note.common.entity.Note;
+import org.example.cipherws.note.common.entity.NoteAiConfig;
+import org.example.cipherws.note.common.entity.NoteSystemAnnouncement;
+import org.example.cipherws.note.common.entity.NoteUser;
 import org.example.cipherws.note.common.exception.BusinessException;
 import org.example.cipherws.note.common.result.Result;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
-import java.sql.PreparedStatement;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -44,9 +43,18 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 后台业务实现。全部走 JdbcTemplate + 预编译占位符：
- * 表名固定写在常量里（`note_user` / `note` / `note_tag` 与系统库同名，一律加反引号），
- * 只有值走 {@code ?}，从不拼接用户输入。
+ * 后台业务实现。数据访问全部走 {@link AdminMapper} / {@link AdminLogMapper}（MyBatis），
+ * 这个文件里没有一行 SQL，只负责业务判断：
+ * <ul>
+ *   <li>校验（额度范围、公告标题长度、日期格式…）与异常文案；</li>
+ *   <li>审计日志：每个改数据的方法都写一条 admin 操作日志，与变更同事务；</li>
+ *   <li>分页夹取（默认 10 条、上限 100 条）与结果形态转换（Map/实体 -&gt; 出参 VO）。</li>
+ * </ul>
+ *
+ * <p><b>Map 返回值注意：</b>投影 / 聚合查询用的是 {@code resultType="map"}，key 是**原始列名
+ * （下划线）**——{@code map-underscore-to-camel-case} 只对实体生效。所有取值都过一遍
+ * {@link #stringVal} / {@link #longVal} / {@link #intVal} / {@link #boolVal} / {@link #formatTime}
+ * 这组工具：MyBatis 默认不把 null 列写进 Map，缺 key 就等价于原来的 {@code rs.getXxx} 拿到 null。</p>
  */
 @Service
 public class AdminServiceImpl implements AdminService {
@@ -69,97 +77,30 @@ public class AdminServiceImpl implements AdminService {
     /** ip 列是 VARCHAR(64)，X-Forwarded-For 可能带一长串代理链 */
     private static final int IP_MAX = 64;
 
-    private static final String SQL_USER_SELECT =
-            "SELECT u.`id`, u.`username`, u.`nickname`, u.`email`, u.`role`, u.`enabled`, u.`ai_quota`,"
-                    + " (SELECT COUNT(*) FROM `note` n WHERE n.`user_id` = u.`id` AND n.`deleted` = 0) AS `note_count`,"
-                    + " u.`created_at`";
-    private static final String SQL_USER_FROM = " FROM `note_user` u";
+    /** 日志兜底词：管理员日志里 JOIN 不到人时显示「管理员」 */
+    private static final String ACTOR_ADMIN = "管理员";
+    /** 日志兜底词：用户日志里 JOIN 不到人时显示「用户」 */
+    private static final String ACTOR_USER = "用户";
 
-    private static final String SQL_NOTE_INSPECT_SELECT =
-            "SELECT n.`id`, n.`title`, n.`content`, n.`status`, n.`flagged`, n.`updated_at`,"
-                    + " COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '未知用户') AS `author_name`";
-    /**
-     * 用 LEFT JOIN 而不是 JOIN：作者注销后笔记还在回收站 / 巡检视角里，
-     * 内连接会让这些行整行消失，管理员就查不到违规内容了。
-     */
-    private static final String SQL_NOTE_INSPECT_FROM =
-            " FROM `note` n LEFT JOIN `note_user` u ON u.`id` = n.`user_id`";
+    private final AdminMapper adminMapper;
+    private final AdminLogMapper adminLogMapper;
 
-    private static final String SQL_AI_CONFIG_SELECT =
-            "SELECT `endpoint`, `api_key`, `model`, `max_chars`, `updated_at` FROM `note_ai_config` WHERE `id` = 1";
-
-    private static final String SQL_ANNOUNCEMENT_SELECT =
-            "SELECT `id`, `title`, `content`, `enabled`, `created_at` FROM `note_system_announcement`";
-
-    private static final String SQL_ADMIN_LOG_SELECT =
-            "SELECT l.`id`, l.`type`, l.`detail`, l.`ip`, l.`created_at`,"
-                    + " COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '管理员') AS `actor_name`";
-    private static final String SQL_ADMIN_LOG_FROM =
-            " FROM `note_admin_operation_log` l LEFT JOIN `note_user` u ON u.`id` = l.`admin_id`";
-
-    private static final String SQL_USER_LOG_SELECT =
-            "SELECT l.`id`, l.`type`, l.`detail`, l.`ip`, l.`created_at`,"
-                    + " COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '用户') AS `actor_name`";
-    private static final String SQL_USER_LOG_FROM =
-            " FROM `note_user_operation_log` l LEFT JOIN `note_user` u ON u.`id` = l.`user_id`";
-
-    private static final RowMapper<UserVo> USER_VO_MAPPER = (rs, rowNum) -> new UserVo(
-            rs.getLong("id"),
-            rs.getString("username"),
-            rs.getString("nickname"),
-            rs.getString("email"),
-            rs.getString("role"),
-            rs.getBoolean("enabled"),
-            rs.getInt("ai_quota"),
-            rs.getLong("note_count"),
-            formatTime(rs.getTimestamp("created_at")));
-
-    private static final RowMapper<InspectNoteVo> INSPECT_NOTE_MAPPER = (rs, rowNum) -> new InspectNoteVo(
-            rs.getLong("id"),
-            rs.getString("title"),
-            rs.getString("content"),
-            rs.getString("status"),
-            rs.getBoolean("flagged"),
-            rs.getString("author_name"),
-            formatTime(rs.getTimestamp("updated_at")),
-            List.of());
-
-    private static final RowMapper<AnnouncementVo> ANNOUNCEMENT_MAPPER = (rs, rowNum) -> new AnnouncementVo(
-            rs.getLong("id"),
-            rs.getString("title"),
-            rs.getString("content"),
-            rs.getBoolean("enabled"),
-            formatTime(rs.getTimestamp("created_at")));
-
-    private static final RowMapper<LogVo> LOG_MAPPER = (rs, rowNum) -> new LogVo(
-            rs.getLong("id"),
-            rs.getString("type"),
-            rs.getString("detail"),
-            rs.getString("actor_name"),
-            rs.getString("ip"),
-            formatTime(rs.getTimestamp("created_at")));
-
-    @Resource
-    private JdbcTemplate jdbcTemplate;
+    public AdminServiceImpl(AdminMapper adminMapper, AdminLogMapper adminLogMapper) {
+        this.adminMapper = adminMapper;
+        this.adminLogMapper = adminLogMapper;
+    }
 
     // ================================================================== 用户管理
 
     @Override
     public Result listUsers(String keyword, Integer page, Integer size) {
-        StringBuilder where = new StringBuilder(" WHERE 1 = 1");
-        List<Object> args = new ArrayList<>();
-        String kw = clean(keyword);
-        if (!kw.isEmpty()) {
-            where.append(" AND (u.`username` LIKE ? OR u.`nickname` LIKE ? OR u.`email` LIKE ?)");
-            String pattern = like(kw);
-            Collections.addAll(args, pattern, pattern, pattern);
-        }
+        String pattern = likePattern(keyword);
         // 为什么单独 COUNT：LIMIT 之后拿不到总条数，前端分页器要靠 total 算页数
-        long total = count("SELECT COUNT(*)" + SQL_USER_FROM + where, args);
-        List<Object> pageArgs = withPaging(args, page, size);
-        List<UserVo> rows = jdbcTemplate.query(
-                SQL_USER_SELECT + SQL_USER_FROM + where + " ORDER BY u.`id` ASC LIMIT ? OFFSET ?",
-                USER_VO_MAPPER, pageArgs.toArray());
+        long total = count(adminMapper.countUsers(pattern));
+        List<UserVo> rows = adminMapper.listUsers(pattern, pageSize(size), offset(page, size))
+                .stream()
+                .map(AdminServiceImpl::toUserVo)
+                .toList();
         return Result.ok(rows, total);
     }
 
@@ -179,7 +120,7 @@ public class AdminServiceImpl implements AdminService {
             throw new BusinessException("不能禁用自己");
         }
         UserBrief before = findUserBrief(targetUserId);
-        jdbcTemplate.update("UPDATE `note_user` SET `enabled` = ? WHERE `id` = ?", next, targetUserId);
+        adminMapper.updateUserEnabled(targetUserId, next);
         writeLog(adminId, next ? "启用用户" : "禁用用户",
                 "账号 " + before.username() + "，状态 " + stateText(before.enabled())
                         + " -> " + stateText(next));
@@ -196,7 +137,7 @@ public class AdminServiceImpl implements AdminService {
             throw new BusinessException("用户不存在");
         }
         UserBrief before = findUserBrief(targetUserId);
-        jdbcTemplate.update("UPDATE `note_user` SET `ai_quota` = ? WHERE `id` = ?", aiQuota, targetUserId);
+        adminMapper.updateUserQuota(targetUserId, aiQuota);
         writeLog(adminId, "重置 AI 配额",
                 "账号 " + before.username() + "，额度 " + before.aiQuota() + " -> " + aiQuota);
         return Result.ok(findUserVo(targetUserId));
@@ -206,28 +147,19 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     public Result inspectNotes(String keyword, Integer page, Integer size) {
-        // 回收站里的笔记用户自己都看不到了，巡检只看线上内容
-        StringBuilder where = new StringBuilder(" WHERE n.`deleted` = 0");
-        List<Object> args = new ArrayList<>();
-        String kw = clean(keyword);
-        if (!kw.isEmpty()) {
-            // 列表里展示的是昵称，所以昵称也得能搜到，否则用户看到「池禾」却搜不出来
-            where.append(" AND (n.`title` LIKE ? OR u.`username` LIKE ? OR u.`nickname` LIKE ?)");
-            String pattern = like(kw);
-            Collections.addAll(args, pattern, pattern, pattern);
-        }
-        long total = count("SELECT COUNT(*)" + SQL_NOTE_INSPECT_FROM + where, args);
-        List<Object> pageArgs = withPaging(args, page, size);
-        List<InspectNoteVo> rows = jdbcTemplate.query(
-                SQL_NOTE_INSPECT_SELECT + SQL_NOTE_INSPECT_FROM + where
-                        + " ORDER BY n.`updated_at` DESC, n.`id` DESC LIMIT ? OFFSET ?",
-                INSPECT_NOTE_MAPPER, pageArgs.toArray());
+        // 回收站里的笔记用户自己都看不到了，巡检只看线上内容（deleted = 0 写在 SQL 片段里）
+        String pattern = likePattern(keyword);
+        long total = count(adminMapper.countInspectNotes(pattern));
+        List<InspectNoteVo> rows = adminMapper.listInspectNotes(pattern, pageSize(size), offset(page, size))
+                .stream()
+                .map(AdminServiceImpl::toInspectNoteVo)
+                .toList();
         return Result.ok(withTags(rows), total);
     }
 
     /**
      * 需求 4.6.2 / 7.3 硬约束：管理员只能标记违规，绝不能改用户笔记的标题和正文。
-     * 所以这条 UPDATE 里只有 flagged 一列，改正文的口子在这里被彻底焊死。
+     * 所以对应的 UPDATE 里只有 flagged 一列，改正文的口子在这里被彻底焊死。
      */
     @Override
     @Transactional
@@ -235,12 +167,12 @@ public class AdminServiceImpl implements AdminService {
         if (noteId == null) {
             throw new BusinessException("笔记不存在");
         }
-        NoteBrief before = findNoteBrief(noteId);
+        Note before = findNoteBrief(noteId);
         boolean next = Boolean.TRUE.equals(flagged);
-        jdbcTemplate.update("UPDATE `note` SET `flagged` = ? WHERE `id` = ?", next, noteId);
+        adminMapper.updateNoteFlagged(noteId, next);
         // 日志类型与建表脚本注释里的约定保持一致
         writeLog(adminId, "巡检笔记",
-                (next ? "标记违规" : "取消标记") + "《" + before.title() + "》");
+                (next ? "标记违规" : "取消标记") + "《" + before.getTitle() + "》");
         return Result.ok(findInspectNote(noteId));
     }
 
@@ -281,19 +213,13 @@ public class AdminServiceImpl implements AdminService {
         String apiKey = clean(request.apiKey());
         if (apiKey.isEmpty()) {
             // 前端读到的永远是掩码，用户不改密钥时根本不会提交这个字段，
-            // 所以「空」必须解释成沿用旧密钥，而不是把密钥清空
-            jdbcTemplate.update(
-                    "UPDATE `note_ai_config` SET `endpoint` = ?, `model` = ?, `max_chars` = ?, `updated_by` = ?"
-                            + " WHERE `id` = 1",
-                    endpoint, model, maxChars, adminId);
+            // 所以「空」必须解释成沿用旧密钥，而不是把密钥清空 —— 对应不碰 api_key 列的 UPDATE
+            adminMapper.updateAiConfigKeepKey(endpoint, model, maxChars, adminId);
         } else {
             if (apiKey.length() > 255) {
                 throw new BusinessException("接口密钥不能超过 255 个字符");
             }
-            jdbcTemplate.update(
-                    "UPDATE `note_ai_config` SET `endpoint` = ?, `model` = ?, `max_chars` = ?, `api_key` = ?,"
-                            + " `updated_by` = ? WHERE `id` = 1",
-                    endpoint, model, maxChars, apiKey, adminId);
+            adminMapper.updateAiConfigWithKey(endpoint, model, maxChars, apiKey, adminId);
         }
 
         writeLog(adminId, "修改 AI 配置",
@@ -307,11 +233,11 @@ public class AdminServiceImpl implements AdminService {
 
     @Override
     public Result listAnnouncements(Integer page, Integer size) {
-        long total = count("SELECT COUNT(*) FROM `note_system_announcement`", List.of());
-        List<Object> pageArgs = withPaging(List.of(), page, size);
-        List<AnnouncementVo> rows = jdbcTemplate.query(
-                SQL_ANNOUNCEMENT_SELECT + " ORDER BY `created_at` DESC, `id` DESC LIMIT ? OFFSET ?",
-                ANNOUNCEMENT_MAPPER, pageArgs.toArray());
+        long total = count(adminMapper.countAnnouncements());
+        List<AnnouncementVo> rows = adminMapper.listAnnouncements(pageSize(size), offset(page, size))
+                .stream()
+                .map(AdminServiceImpl::toAnnouncementVo)
+                .toList();
         return Result.ok(rows, total);
     }
 
@@ -326,25 +252,20 @@ public class AdminServiceImpl implements AdminService {
         // 前端不传 enabled 时按「立即启用」处理，和历史行为一致
         boolean enabled = request == null || !Boolean.FALSE.equals(request.enabled());
 
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbcTemplate.update(connection -> {
-            PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO `note_system_announcement` (`title`, `content`, `admin_id`, `enabled`)"
-                            + " VALUES (?, ?, ?, ?)",
-                    Statement.RETURN_GENERATED_KEYS);
-            ps.setString(1, title);
-            ps.setString(2, content);
-            ps.setLong(3, adminId);
-            ps.setBoolean(4, enabled);
-            return ps;
-        }, keyHolder);
-        // 自增主键由驱动回填，不能靠再查一次 LAST_INSERT_ID()：连接池里可能是另一条连接
-        Number generated = keyHolder.getKey();
+        NoteSystemAnnouncement entity = new NoteSystemAnnouncement();
+        entity.setTitle(title);
+        entity.setContent(content);
+        entity.setAdminId(adminId);
+        entity.setEnabled(enabled);
+        // 自增主键由驱动回填到实体（useGeneratedKeys），不用再查一次 LAST_INSERT_ID()：
+        // 连接池里那次查询可能落到另一条连接上
+        adminMapper.insertAnnouncement(entity);
+        Long generated = entity.getId();
         if (generated == null) {
             throw new BusinessException("公告发布失败，请稍后重试");
         }
         writeLog(adminId, "发布公告", "发布《" + title + "》");
-        return Result.ok(findAnnouncement(generated.longValue()));
+        return Result.ok(findAnnouncement(generated));
     }
 
     @Override
@@ -364,9 +285,7 @@ public class AdminServiceImpl implements AdminService {
         boolean enabled = (request == null || request.enabled() == null)
                 ? before.enabled() : request.enabled().booleanValue();
 
-        jdbcTemplate.update(
-                "UPDATE `note_system_announcement` SET `title` = ?, `content` = ?, `enabled` = ? WHERE `id` = ?",
-                title, content, enabled, id);
+        adminMapper.updateAnnouncement(id, title, content, enabled);
         writeLog(adminId, "编辑公告",
                 "编辑《" + title + "》" + (before.enabled() == enabled ? "" : (enabled ? "，已启用" : "，已下线")));
         return Result.ok(findAnnouncement(id));
@@ -382,7 +301,7 @@ public class AdminServiceImpl implements AdminService {
         if (before == null) {
             throw new BusinessException("公告不存在");
         }
-        jdbcTemplate.update("DELETE FROM `note_system_announcement` WHERE `id` = ?", id);
+        adminMapper.deleteAnnouncement(id);
         writeLog(adminId, "删除公告", "删除《" + before.title() + "》");
         return Result.ok(true);
     }
@@ -392,9 +311,10 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public Result listPublishedAnnouncements() {
         // 公告数量天然很少，一次全给前端，不必为了统一而强行分页
-        List<AnnouncementVo> rows = jdbcTemplate.query(
-                SQL_ANNOUNCEMENT_SELECT + " WHERE `enabled` = 1 ORDER BY `created_at` DESC, `id` DESC",
-                ANNOUNCEMENT_MAPPER);
+        List<AnnouncementVo> rows = adminMapper.listPublishedAnnouncements()
+                .stream()
+                .map(AdminServiceImpl::toAnnouncementVo)
+                .toList();
         return Result.ok(rows, (long) rows.size());
     }
 
@@ -403,54 +323,43 @@ public class AdminServiceImpl implements AdminService {
     @Override
     public Result listLogs(String type, String keyword, String from, String to,
                            Integer page, Integer size) {
+        // type 决定查哪张表。表名在 XML 里是写死的两条完整语句，Service 只按类型选方法调用，
+        // 没有任何字符串拼进去 —— 这是不用 ${} 拼表名换来的安全边界。
         boolean adminLog = "admin".equalsIgnoreCase(clean(type));
-        String select = adminLog ? SQL_ADMIN_LOG_SELECT : SQL_USER_LOG_SELECT;
-        String fromClause = adminLog ? SQL_ADMIN_LOG_FROM : SQL_USER_LOG_FROM;
-        String actorFallback = adminLog ? "管理员" : "用户";
+        String pattern = likePattern(keyword);
+        // 操作人是 JOIN 出来的，LIKE 里的兜底词必须和 SELECT 的 COALESCE 一致，
+        // 否则「孤儿日志」显示的是「管理员」却搜不到这个词
+        String actorFallback = adminLog ? ACTOR_ADMIN : ACTOR_USER;
+        // 日期解析放在查询之前：格式错误直接抛「起始日期/结束日期格式需为 yyyy-MM-dd」，不白跑一次 SQL
+        LocalDateTime fromTime = clean(from).isEmpty() ? null : parseDay(from, "起始日期").atStartOfDay();
+        LocalDateTime toTime = clean(to).isEmpty() ? null : parseDay(to, "结束日期").plusDays(1).atStartOfDay();
+        int limit = pageSize(size);
+        int offset = offset(page, size);
 
-        StringBuilder where = new StringBuilder(" WHERE 1 = 1");
-        List<Object> args = new ArrayList<>();
-        String kw = clean(keyword);
-        if (!kw.isEmpty()) {
-            // 操作人是 JOIN 出来的，LIKE 里的兜底值必须和 SELECT 的 COALESCE 一致，
-            // 否则「孤儿日志」显示的是「管理员」却搜不到这个词
-            where.append(" AND (l.`type` LIKE ? OR l.`detail` LIKE ?"
-                    + " OR COALESCE(NULLIF(u.`nickname`, ''), u.`username`, ?) LIKE ?)");
-            String pattern = like(kw);
-            Collections.addAll(args, pattern, pattern, actorFallback, pattern);
+        long total;
+        List<Map<String, Object>> rows;
+        if (adminLog) {
+            total = count(adminLogMapper.countAdminLogs(pattern, actorFallback, fromTime, toTime));
+            rows = adminLogMapper.listAdminLogs(pattern, actorFallback, fromTime, toTime, limit, offset);
+        } else {
+            total = count(adminLogMapper.countUserLogs(pattern, actorFallback, fromTime, toTime));
+            rows = adminLogMapper.listUserLogs(pattern, actorFallback, fromTime, toTime, limit, offset);
         }
-        if (!clean(from).isEmpty()) {
-            where.append(" AND l.`created_at` >= ?");
-            args.add(Timestamp.valueOf(parseDay(from, "起始日期").atStartOfDay()));
-        }
-        if (!clean(to).isEmpty()) {
-            // 结束日期含当天整天：用「次日 0 点之前」比较，比 <= 23:59:59 更稳，
-            // created_at 带毫秒也不会漏掉最后一条
-            where.append(" AND l.`created_at` < ?");
-            args.add(Timestamp.valueOf(parseDay(to, "结束日期").plusDays(1).atStartOfDay()));
-        }
-
-        long total = count("SELECT COUNT(*)" + fromClause + where, args);
-        List<Object> pageArgs = withPaging(args, page, size);
-        List<LogVo> rows = jdbcTemplate.query(
-                select + fromClause + where + " ORDER BY l.`created_at` DESC, l.`id` DESC LIMIT ? OFFSET ?",
-                LOG_MAPPER, pageArgs.toArray());
-        return Result.ok(rows, total);
+        List<LogVo> logs = rows.stream().map(AdminServiceImpl::toLogVo).toList();
+        return Result.ok(logs, total);
     }
 
     @Override
     public Result stats() {
         LocalDate start = LocalDate.now().minusDays(6);
-        List<Map<String, Object>> grouped = jdbcTemplate.queryForList(
-                "SELECT DATE(`created_at`) AS `day`, COUNT(*) AS `calls` FROM `note_ai_summary_record`"
-                        + " WHERE `created_at` >= ? GROUP BY DATE(`created_at`)",
-                Timestamp.valueOf(start.atStartOfDay()));
+        // key 是 day / calls（下划线原样：Map 不参与 map-underscore-to-camel-case）
+        List<Map<String, Object>> grouped = adminLogMapper.countAiCallsByDay(start.atStartOfDay());
         Map<String, Long> byDay = new HashMap<>();
         for (Map<String, Object> row : grouped) {
             Object day = row.get("day");
             String key = day instanceof java.sql.Date date
                     ? date.toLocalDate().format(DAY_FORMAT) : String.valueOf(day);
-            byDay.put(key, ((Number) row.get("calls")).longValue());
+            byDay.put(key, longVal(row.get("calls")));
         }
 
         // 没有调用的日子也要占一格并给 0：前端按固定 7 根柱子画趋势图，缺日期会错位
@@ -460,29 +369,21 @@ public class AdminServiceImpl implements AdminService {
             daily.add(new DailyCountVo(key, byDay.getOrDefault(key, 0L)));
         }
 
-        // GROUP BY 带上昵称与账号，既满足 ONLY_FULL_GROUP_BY，也能直接取到展示名
-        List<TopUserVo> topUsers = jdbcTemplate.query(
-                "SELECT r.`user_id` AS `user_id`,"
-                        + " COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '未知用户') AS `name`,"
-                        + " COUNT(*) AS `calls`"
-                        + " FROM `note_ai_summary_record` r LEFT JOIN `note_user` u ON u.`id` = r.`user_id`"
-                        + " GROUP BY r.`user_id`, u.`nickname`, u.`username`"
-                        + " ORDER BY `calls` DESC, r.`user_id` ASC LIMIT 5",
-                (rs, rowNum) -> new TopUserVo(
-                        rs.getLong("user_id"), rs.getString("name"), rs.getLong("calls")));
+        // key 是 user_id / name / calls
+        List<TopUserVo> topUsers = adminLogMapper.topUsers().stream()
+                .map(row -> new TopUserVo(
+                        longVal(row.get("user_id")), stringVal(row.get("name")), longVal(row.get("calls"))))
+                .toList();
 
-        // 四个总量都是一次性的，用子查询合成一行，省三次往返
-        TotalsVo summed = jdbcTemplate.queryForObject(
-                "SELECT (SELECT COUNT(*) FROM `note_user`) AS `users`,"
-                        + " (SELECT COUNT(*) FROM `note` WHERE `deleted` = 0) AS `notes`,"
-                        + " (SELECT COUNT(*) FROM `note_ai_summary_record`) AS `ai_calls`,"
-                        + " (SELECT COUNT(*) FROM `note` WHERE `flagged` = 1 AND `deleted` = 0)"
-                        + " AS `flagged_notes`",
-                (rs, rowNum) -> new TotalsVo(
-                        rs.getLong("users"), rs.getLong("notes"),
-                        rs.getLong("ai_calls"), rs.getLong("flagged_notes")));
+        // key 是 users / notes / ai_calls / flagged_notes；聚合查询恒返回一行，兜 null 只是防御
+        Map<String, Object> totals = Objects.requireNonNullElse(adminLogMapper.totals(), Map.of());
+        TotalsVo summed = new TotalsVo(
+                longVal(totals.get("users")),
+                longVal(totals.get("notes")),
+                longVal(totals.get("ai_calls")),
+                longVal(totals.get("flagged_notes")));
 
-        return Result.ok(new StatsVo(daily, topUsers, Objects.requireNonNullElse(summed, new TotalsVo(0, 0, 0, 0))));
+        return Result.ok(new StatsVo(daily, topUsers, summed));
     }
 
     // ================================================================ 内部工具
@@ -491,54 +392,39 @@ public class AdminServiceImpl implements AdminService {
     private record UserBrief(String username, boolean enabled, int aiQuota) {
     }
 
-    /** 笔记巡检只需要标题来做日志文案 */
-    private record NoteBrief(String title) {
-    }
-
-    /** 标签查询的中间行：一个 note 对多个 tag，先摊平再按 note 分组 */
-    private record TagRow(Long noteId, TagVo tag) {
-    }
-
     private UserBrief findUserBrief(Long userId) {
-        List<UserBrief> rows = jdbcTemplate.query(
-                "SELECT `username`, `enabled`, `ai_quota` FROM `note_user` WHERE `id` = ?",
-                (rs, rowNum) -> new UserBrief(
-                        rs.getString("username"), rs.getBoolean("enabled"), rs.getInt("ai_quota")),
-                userId);
-        if (rows.isEmpty()) {
+        NoteUser user = adminMapper.findUserBrief(userId);
+        if (user == null) {
             throw new BusinessException("用户不存在");
         }
-        return rows.get(0);
+        // enabled / ai_quota 两列都是 NOT NULL，这里的兜底只是为了让 record 的类型保持基本类型
+        return new UserBrief(user.getUsername(), Boolean.TRUE.equals(user.getEnabled()),
+                user.getAiQuota() == null ? 0 : user.getAiQuota());
     }
 
     private UserVo findUserVo(Long userId) {
-        List<UserVo> rows = jdbcTemplate.query(
-                SQL_USER_SELECT + SQL_USER_FROM + " WHERE u.`id` = ?", USER_VO_MAPPER, userId);
-        if (rows.isEmpty()) {
+        Map<String, Object> row = adminMapper.findUserVo(userId);
+        if (row == null) {
             throw new BusinessException("用户不存在");
         }
-        return rows.get(0);
+        return toUserVo(row);
     }
 
-    private NoteBrief findNoteBrief(Long noteId) {
-        List<NoteBrief> rows = jdbcTemplate.query(
-                "SELECT `title` FROM `note` WHERE `id` = ?",
-                (rs, rowNum) -> new NoteBrief(rs.getString("title")),
-                noteId);
-        if (rows.isEmpty()) {
+    /** 日志文案只需要标题，所以 SQL 只取 id + title；查不到返回 null 由调用方翻成「笔记不存在」 */
+    private Note findNoteBrief(Long noteId) {
+        Note note = adminMapper.findNoteBrief(noteId);
+        if (note == null) {
             throw new BusinessException("笔记不存在");
         }
-        return rows.get(0);
+        return note;
     }
 
     private InspectNoteVo findInspectNote(Long noteId) {
-        List<InspectNoteVo> rows = jdbcTemplate.query(
-                SQL_NOTE_INSPECT_SELECT + SQL_NOTE_INSPECT_FROM + " WHERE n.`id` = ?",
-                INSPECT_NOTE_MAPPER, noteId);
-        if (rows.isEmpty()) {
+        Map<String, Object> row = adminMapper.findInspectNote(noteId);
+        if (row == null) {
             throw new BusinessException("笔记不存在");
         }
-        InspectNoteVo note = rows.get(0);
+        InspectNoteVo note = toInspectNoteVo(row);
         return withTags(note, loadTags(List.of(noteId)).getOrDefault(noteId, List.of()));
     }
 
@@ -559,43 +445,43 @@ public class AdminServiceImpl implements AdminService {
                 note.flagged(), note.authorName(), note.updatedAt(), tags);
     }
 
+    /**
+     * key 是 note_id / tag_id / tag_name。标签列刻意做了别名：原列名 {@code id} 与 note 的 id 同名，
+     * 同一条 Map 里两个 id 混着取是这类改造里最容易出的错。
+     */
     private Map<Long, List<TagVo>> loadTags(List<Long> noteIds) {
         if (noteIds.isEmpty()) {
             return Map.of();
         }
-        // IN (?, ?, ?) 的占位符个数按页大小生成，仍然只有值走参数，没有拼 SQL 值
-        String placeholders = String.join(", ", Collections.nCopies(noteIds.size(), "?"));
-        List<TagRow> rows = jdbcTemplate.query(
-                "SELECT r.`note_id`, t.`id`, t.`name` FROM `note_tag_rel` r"
-                        + " JOIN `note_tag` t ON t.`id` = r.`tag_id`"
-                        + " WHERE r.`note_id` IN (" + placeholders + ") ORDER BY t.`name` ASC",
-                (rs, rowNum) -> new TagRow(rs.getLong("note_id"),
-                        new TagVo(rs.getLong("id"), rs.getString("name"))),
-                noteIds.toArray());
+        // IN (?, ?, ?) 的占位符个数由 <foreach> 按集合大小生成，仍然只有值走参数
+        List<Map<String, Object>> rows = adminMapper.findTagsByNoteIds(noteIds);
         Map<Long, List<TagVo>> grouped = new LinkedHashMap<>();
-        for (TagRow row : rows) {
-            grouped.computeIfAbsent(row.noteId(), key -> new ArrayList<>()).add(row.tag());
+        for (Map<String, Object> row : rows) {
+            Long noteId = longVal(row.get("note_id"));
+            TagVo tag = new TagVo(longVal(row.get("tag_id")), stringVal(row.get("tag_name")));
+            grouped.computeIfAbsent(noteId, key -> new ArrayList<>()).add(tag);
         }
         return grouped;
     }
 
     private AiConfigVo readAiConfig() {
-        List<AiConfigVo> rows = jdbcTemplate.query(SQL_AI_CONFIG_SELECT, (rs, rowNum) -> new AiConfigVo(
-                rs.getString("endpoint"),
-                rs.getString("model"),
-                rs.getInt("max_chars"),
-                maskKey(rs.getString("api_key")),
-                formatTime(rs.getTimestamp("updated_at"))));
-        if (rows.isEmpty()) {
+        NoteAiConfig config = adminMapper.findAiConfig();
+        if (config == null) {
             throw new BusinessException("AI 配置不存在，请先执行 note-schema.sql 初始化");
         }
-        return rows.get(0);
+        return new AiConfigVo(
+                config.getEndpoint(),
+                config.getModel(),
+                // max_chars 是 NOT NULL，这里兜 0 只是为了保持「原来是 rs.getInt 拆箱」的等价性
+                config.getMaxChars() == null ? 0 : config.getMaxChars(),
+                maskKey(config.getApiKey()),
+                formatTime(config.getUpdatedAt()));
     }
 
+    /** 查不到返回 null（发布公告后回查、编辑前取旧值都靠这个语义） */
     private AnnouncementVo findAnnouncement(Long id) {
-        List<AnnouncementVo> rows = jdbcTemplate.query(
-                SQL_ANNOUNCEMENT_SELECT + " WHERE `id` = ?", ANNOUNCEMENT_MAPPER, id);
-        return rows.isEmpty() ? null : rows.get(0);
+        NoteSystemAnnouncement entity = adminMapper.findAnnouncement(id);
+        return entity == null ? null : toAnnouncementVo(entity);
     }
 
     /**
@@ -610,6 +496,111 @@ public class AdminServiceImpl implements AdminService {
         return visible + "********";
     }
 
+    // ------------------------------------------------------------ Map / 实体 -> VO
+
+    /** key：id / username / nickname / email / role / enabled / ai_quota / note_count / created_at */
+    private static UserVo toUserVo(Map<String, Object> row) {
+        return new UserVo(
+                longVal(row.get("id")),
+                stringVal(row.get("username")),
+                stringVal(row.get("nickname")),
+                stringVal(row.get("email")),
+                stringVal(row.get("role")),
+                boolVal(row.get("enabled")),
+                intVal(row.get("ai_quota")),
+                longVal(row.get("note_count")),
+                formatTime(row.get("created_at")));
+    }
+
+    /** key：id / title / content / status / flagged / author_name / updated_at */
+    private static InspectNoteVo toInspectNoteVo(Map<String, Object> row) {
+        return new InspectNoteVo(
+                longVal(row.get("id")),
+                stringVal(row.get("title")),
+                stringVal(row.get("content")),
+                stringVal(row.get("status")),
+                boolVal(row.get("flagged")),
+                stringVal(row.get("author_name")),
+                formatTime(row.get("updated_at")),
+                List.of());
+    }
+
+    /** key：id / title / content / enabled / created_at */
+    private static AnnouncementVo toAnnouncementVo(Map<String, Object> row) {
+        return new AnnouncementVo(
+                longVal(row.get("id")),
+                stringVal(row.get("title")),
+                stringVal(row.get("content")),
+                boolVal(row.get("enabled")),
+                formatTime(row.get("created_at")));
+    }
+
+    /** 直接从实体转（findAnnouncement 用的是 resultType="NoteSystemAnnouncement"） */
+    private static AnnouncementVo toAnnouncementVo(NoteSystemAnnouncement entity) {
+        return new AnnouncementVo(
+                entity.getId(),
+                entity.getTitle(),
+                entity.getContent(),
+                Boolean.TRUE.equals(entity.getEnabled()),
+                formatTime(entity.getCreatedAt()));
+    }
+
+    /** key：id / type / detail / actor_name / ip / created_at */
+    private static LogVo toLogVo(Map<String, Object> row) {
+        return new LogVo(
+                longVal(row.get("id")),
+                stringVal(row.get("type")),
+                stringVal(row.get("detail")),
+                stringVal(row.get("actor_name")),
+                stringVal(row.get("ip")),
+                formatTime(row.get("created_at")));
+    }
+
+    // ------------------------------------------------------------ Map 取值兜底
+
+    /** MyBatis 默认不把 null 列写进 Map，所以「缺 key」与「值为 null」都要能安全取值 */
+    private static String stringVal(Object value) {
+        return value == null ? null : value.toString();
+    }
+
+    private static long longVal(Object value) {
+        return value instanceof Number number ? number.longValue() : 0L;
+    }
+
+    private static int intVal(Object value) {
+        return value instanceof Number number ? number.intValue() : 0;
+    }
+
+    /**
+     * TINYINT(1) 在 Map 里可能是 Boolean（驱动按 tinyInt1isBit 转），也可能是数字，
+     * 两种都认；null 视为 false —— 与原来的 {@code rs.getBoolean} 行为一致。
+     */
+    private static boolean boolVal(Object value) {
+        if (value instanceof Boolean flag) {
+            return flag;
+        }
+        if (value instanceof Number number) {
+            return number.intValue() != 0;
+        }
+        return false;
+    }
+
+    /**
+     * 时间列的格式化。实体里是 LocalDateTime；Map 里可能是 LocalDateTime，
+     * 也可能是 Timestamp（取决于驱动版本），两种都认。null 输出空串（与改造前一致）。
+     */
+    private static String formatTime(Object value) {
+        if (value instanceof LocalDateTime time) {
+            return time.format(TIME_FORMAT);
+        }
+        if (value instanceof Timestamp timestamp) {
+            return timestamp.toLocalDateTime().format(TIME_FORMAT);
+        }
+        return "";
+    }
+
+    // ------------------------------------------------------------ 其余工具
+
     /**
      * 审计日志统一从这里落库。IP 属于传输层信息，不该塞进每个业务方法签名，
      * 所以直接取当前请求上下文；取不到（异步线程 / 定时任务）就留空，
@@ -621,9 +612,7 @@ public class AdminServiceImpl implements AdminService {
             log.warn("缺少管理员身份，跳过审计日志：type={}, detail={}", type, detail);
             return;
         }
-        jdbcTemplate.update(
-                "INSERT INTO `note_admin_operation_log` (`admin_id`, `type`, `detail`, `ip`) VALUES (?, ?, ?, ?)",
-                adminId, type, clip(detail, DETAIL_MAX), clip(currentIp(), IP_MAX));
+        adminLogMapper.insertAdminLog(adminId, type, clip(detail, DETAIL_MAX), clip(currentIp(), IP_MAX));
     }
 
     private static String currentIp() {
@@ -667,16 +656,9 @@ public class AdminServiceImpl implements AdminService {
         return value;
     }
 
-    private long count(String sql, List<Object> args) {
-        Long total = jdbcTemplate.queryForObject(sql, Long.class, args.toArray());
+    /** COUNT(*) 理论上不会返回 null，兜一下避免拆箱 NPE */
+    private static long count(Long total) {
         return total == null ? 0L : total;
-    }
-
-    private static List<Object> withPaging(List<Object> args, Integer page, Integer size) {
-        List<Object> all = new ArrayList<>(args);
-        all.add(pageSize(size));
-        all.add(offset(page, size));
-        return all;
     }
 
     private static int pageSize(Integer size) {
@@ -695,6 +677,15 @@ public class AdminServiceImpl implements AdminService {
         return value == null ? "" : value.trim();
     }
 
+    /**
+     * 关键词 -&gt; LIKE 模式。null 表示「不按关键词过滤」：空串 / 全空白都翻成 null，
+     * 与改造前的 {@code if (!kw.isEmpty())} 完全等价，SQL 里的 {@code <if>} 直接判断 null。
+     */
+    private static String likePattern(String keyword) {
+        String kw = clean(keyword);
+        return kw.isEmpty() ? null : like(kw);
+    }
+
     /** 关键词里的 % 和 _ 是 LIKE 的通配符，转义后才能当普通字符搜 */
     private static String like(String keyword) {
         String escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
@@ -706,10 +697,6 @@ public class AdminServiceImpl implements AdminService {
             return "";
         }
         return value.length() <= max ? value : value.substring(0, max);
-    }
-
-    private static String formatTime(Timestamp timestamp) {
-        return timestamp == null ? "" : timestamp.toLocalDateTime().format(TIME_FORMAT);
     }
 
     private static String stateText(boolean enabled) {

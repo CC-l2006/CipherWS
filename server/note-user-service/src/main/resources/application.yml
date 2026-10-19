@@ -25,6 +25,16 @@ spring:
         import-check:
           enabled: false
 
+# MyBatis 配置
+mybatis:
+  # XML 映射文件的位置
+  mapper-locations: classpath:mapper/*.xml
+  # 实体类所在包，XML 里就不用写全限定名
+  type-aliases-package: org.example.cipherws.note.common.entity
+  configuration:
+    # ai_quota -> aiQuota 的自动映射，省掉一堆 resultMap
+    map-underscore-to-camel-case: true
+
 note:
   jwt:
     # 必须与 note-gateway 的配置一致，否则网关验不过这里签发的 token
@@ -47,3 +57,5 @@ management:
 logging:
   level:
     org.example.cipherws.note: INFO
+    # DEBUG 才能看到 MyBatis 实际执行的 SQL 与参数，映射出问题时先看这里
+    org.example.cipherws.note.user.mapper: DEBUG

@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  笔记 / 笔记-标签关联 / AI 总结记录 的映射。
+
+  几个约定：
+  1. 表名一律反引号：`note` 与 mysql 系统库同名，不包准踩坑；
+  2. 时间字段直接映射到实体的 LocalDateTime，MyBatis 自动做 java.time 转换，
+     别在这里写 DATE_FORMAT，否则又回到「空格格式在 Safari 上解析失败」的老问题；
+  3. 实体查询用 resultType="Note" / "NoteAiSummaryRecord"（别名来自
+     application.yml 的 type-aliases-package），字段靠 map-underscore-to-camel-case 自动对上；
+  4. 值全部走 #{} 占位符，SQL 片段只拼接固定的列名与条件，没有字符串拼接的入参。
+-->
+<mapper namespace="org.example.cipherws.note.core.mapper.NoteMapper">
+
+    <!-- 列表与详情共用的列，避免两处 select 的字段悄悄跑偏 -->
+    <sql id="noteColumns">
+        n.`id`, n.`title`, n.`content`, n.`status`, n.`flagged`, n.`created_at`, n.`updated_at`
+    </sql>
+
+    <!--
+      列表 / 回收站共用的筛选条件。
+      deleted 由调用方决定：0 = 正常列表，1 = 回收站。
+      其余三项为 null 表示不筛，对应动态 SQL 里的 <if>。
+    -->
+    <sql id="noteListConditions">
+        <where>
+            n.`user_id` = #{userId}
+            AND n.`deleted` = #{deleted}
+            <if test="keywordPattern != null">
+                AND (n.`title` LIKE #{keywordPattern} OR n.`content` LIKE #{keywordPattern})
+            </if>
+            <if test="status != null">
+                AND n.`status` = #{status}
+            </if>
+            <if test="tagId != null">
+                <!-- 用 EXISTS 而不是 JOIN：一篇笔记挂多个标签时 JOIN 会把它变成多行 -->
+                AND EXISTS (SELECT 1 FROM `note_tag_rel` r
+                            WHERE r.`note_id` = n.`id` AND r.`tag_id` = #{tagId})
+            </if>
+        </where>
+    </sql>
+
+    <select id="countNotes" resultType="long">
+        SELECT COUNT(*) FROM `note` n
+        <include refid="noteListConditions"/>
+    </select>
+
+    <select id="selectNotes" resultType="Note">
+        SELECT
+        <include refid="noteColumns"/>
+        FROM `note` n
+        <include refid="noteListConditions"/>
+        ORDER BY n.`updated_at` DESC, n.`id` DESC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 刻意不筛 deleted：回收站里的笔记，详情页仍要能打开、能恢复 -->
+    <select id="selectNoteById" resultType="Note">
+        SELECT
+        <include refid="noteColumns"/>
+        FROM `note` n
+        WHERE n.`id` = #{noteId} AND n.`user_id` = #{userId}
+    </select>
+
+    <!-- 只取详情页用得上的三列；note_id 与 user_id 是两个条件，都写上才严密 -->
+    <select id="selectSummaries" resultType="NoteAiSummaryRecord">
+        SELECT `id`, `summary`, `created_at`
+        FROM `note_ai_summary_record`
+        WHERE `note_id` = #{noteId} AND `user_id` = #{userId}
+        ORDER BY `created_at` DESC, `id` DESC
+    </select>
+
+    <!-- 自增主键回填到实体，新建完就不用再按 max(id) 找一次 -->
+    <insert id="insertNote" parameterType="Note" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `note` (`user_id`, `title`, `content`, `status`)
+        VALUES (#{userId}, #{title}, #{content}, #{status})
+    </insert>
+
+    <!--
+      部分更新：<if> 判空，null 表示「这一项不改」。
+      updated_at 无条件 touch：列表按 updated_at 倒序，行内容没变时 ON UPDATE 不会动它，
+      显式写一下，只改了标签或原地保存的笔记也能排到最前面。
+      <set> 会自动去掉末尾多余的逗号。
+    -->
+    <update id="updateNoteFields">
+        UPDATE `note`
+        <set>
+            <if test="title != null">`title` = #{title},</if>
+            <if test="content != null">`content` = #{content},</if>
+            <if test="status != null">`status` = #{status},</if>
+            `updated_at` = CURRENT_TIMESTAMP
+        </set>
+        WHERE `id` = #{noteId} AND `user_id` = #{userId}
+    </update>
+
+    <update id="softDeleteNote">
+        UPDATE `note`
+        SET `deleted`    = 1,
+            `deleted_at` = CURRENT_TIMESTAMP,
+            `updated_at` = CURRENT_TIMESTAMP
+        WHERE `id` = #{noteId} AND `user_id` = #{userId}
+    </update>
+
+    <update id="restoreNote">
+        UPDATE `note`
+        SET `deleted`    = 0,
+            `deleted_at` = NULL,
+            `updated_at` = CURRENT_TIMESTAMP
+        WHERE `id` = #{noteId} AND `user_id` = #{userId}
+    </update>
+
+    <delete id="deleteNote">
+        DELETE FROM `note` WHERE `id` = #{noteId} AND `user_id` = #{userId}
+    </delete>
+
+    <delete id="deleteSummariesByNote">
+        DELETE FROM `note_ai_summary_record` WHERE `note_id` = #{noteId} AND `user_id` = #{userId}
+    </delete>
+
+    <!--
+      多表 DELETE：只删「当前用户回收站里那些笔记」的摘要。
+      s.user_id 也一并卡住，避免删到别人对同一篇笔记留下的记录。
+    -->
+    <delete id="deleteTrashSummaries">
+        DELETE s
+        FROM `note_ai_summary_record` s
+                 JOIN `note` n ON n.`id` = s.`note_id`
+        WHERE n.`user_id` = #{userId}
+          AND n.`deleted` = 1
+          AND s.`user_id` = #{userId}
+    </delete>
+
+    <delete id="deleteTrashNotes">
+        DELETE FROM `note` WHERE `user_id` = #{userId} AND `deleted` = 1
+    </delete>
+
+    <delete id="deleteTagRelations">
+        DELETE FROM `note_tag_rel` WHERE `note_id` = #{noteId}
+    </delete>
+
+    <!--
+      关联行只在「标签确实属于当前用户」时才插：查不到行就插 0 行，等于静默忽略。
+      同一 tagId 重复出现由 Service 的 LinkedHashSet 去重，避免撞联合主键。
+    -->
+    <insert id="insertTagRelation">
+        INSERT INTO `note_tag_rel` (`note_id`, `tag_id`)
+        SELECT #{noteId}, `id` FROM `note_tag` WHERE `id` = #{tagId} AND `user_id` = #{userId}
+    </insert>
+
+    <!--
+      note_tag_rel 本身不带 user_id，所以关联到 note_tag 后用 t.user_id 再兜一层，
+      防止关联表里出现别人的标签。
+
+      resultType="map"：key 是**原始列名**，map-underscore-to-camel-case 对 Map 不生效，
+      所以 Service 里读的是 note_id / id / name（不是 noteId）。
+    -->
+    <select id="selectNoteTags" resultType="map">
+        SELECT r.`note_id` AS `note_id`,
+               t.`id`      AS `id`,
+               t.`name`    AS `name`
+        FROM `note_tag_rel` r
+                 JOIN `note_tag` t ON t.`id` = r.`tag_id`
+        WHERE r.`note_id` IN
+        <foreach item="id" collection="noteIds" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+          AND t.`user_id` = #{userId}
+    </select>
+
+</mapper>

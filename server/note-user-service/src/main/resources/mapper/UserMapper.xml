@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  用户表映射。
+
+  两个约定：
+  1. 表名 `note_user` 一律加反引号 —— user 与 mysql 系统库同名，不加容易踩坑；
+  2. 时间字段直接用 LocalDateTime，MyBatis 会自动做 java.time 的转换，
+     别在这里做 DATE_FORMAT，否则又回到「空格格式在 Safari 上解析失败」的老问题。
+-->
+<mapper namespace="org.example.cipherws.note.user.mapper.UserMapper">
+
+    <select id="countByUsername" resultType="long">
+        SELECT COUNT(*) FROM `note_user` WHERE username = #{username}
+    </select>
+
+    <select id="countByEmail" resultType="long">
+        SELECT COUNT(*) FROM `note_user` WHERE email = #{email}
+    </select>
+
+    <!-- 登录：必须把 password 取出来做 BCrypt 比对 -->
+    <select id="findByUsername" resultType="NoteUser">
+        SELECT `id`, `username`, `password`, `role`, `enabled`, `email`,
+               `nickname`, `avatar`, `bio`, `ai_quota`, `created_at`, `updated_at`
+        FROM `note_user`
+        WHERE username = #{username}
+    </select>
+
+    <select id="findById" resultType="NoteUser">
+        SELECT `id`, `username`, `password`, `role`, `enabled`, `email`,
+               `nickname`, `avatar`, `bio`, `ai_quota`, `created_at`, `updated_at`
+        FROM `note_user`
+        WHERE `id` = #{id}
+    </select>
+
+    <select id="findPasswordById" resultType="string">
+        SELECT `password` FROM `note_user` WHERE `id` = #{id}
+    </select>
+
+    <!-- 自增主键回填到实体，注册完就不用再查一次 -->
+    <insert id="insert" parameterType="NoteUser" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `note_user` (`username`, `password`, `role`, `enabled`, `email`, `nickname`, `ai_quota`)
+        VALUES (#{username}, #{password}, #{role}, #{enabled}, #{email}, #{nickname}, #{aiQuota})
+    </insert>
+
+    <update id="updateProfile">
+        UPDATE `note_user`
+        SET `nickname` = #{nickname},
+            `email`    = #{email},
+            `bio`      = #{bio},
+            `avatar`   = #{avatar}
+        WHERE `id` = #{id}
+    </update>
+
+    <update id="updatePassword">
+        UPDATE `note_user` SET `password` = #{password} WHERE `id` = #{id}
+    </update>
+
+    <update id="updatePasswordByEmail">
+        UPDATE `note_user` SET `password` = #{password} WHERE `email` = #{email}
+    </update>
+
+    <insert id="insertUserLog">
+        INSERT INTO `note_user_operation_log` (`user_id`, `type`, `detail`, `ip`)
+        VALUES (#{userId}, #{type}, #{detail}, #{ip})
+    </insert>
+
+</mapper>

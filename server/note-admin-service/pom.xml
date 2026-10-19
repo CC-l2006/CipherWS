@@ -26,9 +26,12 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
+        <!-- MyBatis：数据访问层。starter 会带入 spring-jdbc 与 HikariCP，
+             所以不再单独引 spring-boot-starter-jdbc，避免同一套东西引两遍 -->
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-jdbc</artifactId>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+            <version>3.0.4</version>
         </dependency>
         <dependency>
             <groupId>com.mysql</groupId>

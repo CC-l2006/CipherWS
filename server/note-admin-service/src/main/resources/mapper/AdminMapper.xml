@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  后台主数据映射：用户 / 笔记巡检 / AI 配置 / 系统公告。
+
+  几条约定（改之前先看这里）：
+  1. 表名一律反引号：user -> `note_user`、tag -> `note_tag`、ai_config -> `note_ai_config`、
+     system_announcement -> `note_system_announcement`；`note` 与 `note_tag_rel` 不变。
+  2. 实体查询（NoteUser / Note / NoteAiConfig / NoteSystemAnnouncement）用 resultType 别名，
+     别名来自 type-aliases-package，不用写全限定名。
+  3. 投影 / 聚合查询用 resultType="map"：Map 的 key 是**原始列名（下划线）**，
+     map-underscore-to-camel-case 对 Map 不生效，Service 里必须按下划线 key 取值。
+  4. 值一律走 #{}，没有一处 ${}；动态条件用 <if> / <where> / <foreach>。
+-->
+<mapper namespace="org.example.cipherws.note.admin.mapper.AdminMapper">
+
+    <!-- ================================================================ 用户管理 -->
+
+    <!--
+      用户列表的列。为什么单独抽成片段：listUsers 与 findUserVo 的列必须逐字一致，
+      否则同一个用户在两处显示的值会不一样（note_count 尤其容易抄错）。
+    -->
+    <sql id="userSelect">
+        SELECT u.`id`, u.`username`, u.`nickname`, u.`email`, u.`role`, u.`enabled`, u.`ai_quota`,
+               (SELECT COUNT(*) FROM `note` n WHERE n.`user_id` = u.`id` AND n.`deleted` = 0) AS `note_count`,
+               u.`created_at`
+        FROM `note_user` u
+    </sql>
+
+    <!--
+      关键词条件。likePattern 为 null 表示不过滤（Service 已经把空关键词翻成 null），
+      非 null 时必须是转义好的 %kw% —— 所以这里不再套 CONCAT('%', ...)。
+    -->
+    <sql id="userKeyword">
+        <if test="likePattern != null">
+            (u.`username` LIKE #{likePattern} OR u.`nickname` LIKE #{likePattern} OR u.`email` LIKE #{likePattern})
+        </if>
+    </sql>
+
+    <!-- 为什么单独 COUNT：LIMIT 之后拿不到总条数，前端分页器要靠 total 算页数 -->
+    <select id="countUsers" resultType="long">
+        SELECT COUNT(*) FROM `note_user` u
+        <where>
+            <include refid="userKeyword"/>
+        </where>
+    </select>
+
+    <select id="listUsers" resultType="map">
+        <include refid="userSelect"/>
+        <where>
+            <include refid="userKeyword"/>
+        </where>
+        ORDER BY u.`id` ASC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="findUserVo" resultType="map">
+        <include refid="userSelect"/>
+        WHERE u.`id` = #{id}
+    </select>
+
+    <!-- 实体能一一对上，就不用 Map -->
+    <select id="findUserBrief" resultType="NoteUser">
+        SELECT `username`, `enabled`, `ai_quota` FROM `note_user` WHERE `id` = #{id}
+    </select>
+
+    <update id="updateUserEnabled">
+        UPDATE `note_user` SET `enabled` = #{enabled} WHERE `id` = #{id}
+    </update>
+
+    <update id="updateUserQuota">
+        UPDATE `note_user` SET `ai_quota` = #{aiQuota} WHERE `id` = #{id}
+    </update>
+
+    <!-- ================================================================ 笔记巡检 -->
+
+    <!--
+      用 LEFT JOIN 而不是 JOIN：作者注销后笔记还在回收站 / 巡检视角里，
+      内连接会让这些行整行消失，管理员就查不到违规内容了。
+    -->
+    <sql id="inspectNoteSelect">
+        SELECT n.`id`, n.`title`, n.`content`, n.`status`, n.`flagged`, n.`updated_at`,
+               COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '未知用户') AS `author_name`
+        FROM `note` n LEFT JOIN `note_user` u ON u.`id` = n.`user_id`
+    </sql>
+
+    <sql id="inspectNoteWhere">
+        n.`deleted` = 0
+        <if test="likePattern != null">
+            AND (n.`title` LIKE #{likePattern} OR u.`username` LIKE #{likePattern}
+            OR u.`nickname` LIKE #{likePattern})
+        </if>
+    </sql>
+
+    <select id="countInspectNotes" resultType="long">
+        SELECT COUNT(*) FROM `note` n LEFT JOIN `note_user` u ON u.`id` = n.`user_id`
+        <where>
+            <include refid="inspectNoteWhere"/>
+        </where>
+    </select>
+
+    <!-- 回收站里的笔记用户自己都看不到了，巡检只看线上内容（deleted = 0 在片段里） -->
+    <select id="listInspectNotes" resultType="map">
+        <include refid="inspectNoteSelect"/>
+        <where>
+            <include refid="inspectNoteWhere"/>
+        </where>
+        ORDER BY n.`updated_at` DESC, n.`id` DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="findInspectNote" resultType="map">
+        <include refid="inspectNoteSelect"/>
+        WHERE n.`id` = #{id}
+    </select>
+
+    <select id="findNoteBrief" resultType="Note">
+        SELECT `id`, `title` FROM `note` WHERE `id` = #{id}
+    </select>
+
+    <!-- 需求 4.6.2：只允许改 flagged。这里不出现 title / content，改正文的口子被焊死 -->
+    <update id="updateNoteFlagged">
+        UPDATE `note` SET `flagged` = #{flagged} WHERE `id` = #{id}
+    </update>
+
+    <!--
+      标签列名做别名（tag_id / tag_name）：原列名 id 与 note 表的 id 同名，
+      Map 里两个 id 混在一起最容易取错，索性叫明白。
+    -->
+    <select id="findTagsByNoteIds" resultType="map">
+        SELECT r.`note_id` AS `note_id`, t.`id` AS `tag_id`, t.`name` AS `tag_name`
+        FROM `note_tag_rel` r
+        JOIN `note_tag` t ON t.`id` = r.`tag_id`
+        WHERE r.`note_id` IN
+        <foreach collection="noteIds" item="noteId" open="(" separator="," close=")">
+            #{noteId}
+        </foreach>
+        ORDER BY t.`name` ASC
+    </select>
+
+    <!-- ================================================================ AI 配置 -->
+
+    <select id="findAiConfig" resultType="NoteAiConfig">
+        SELECT `endpoint`, `api_key`, `model`, `max_chars`, `updated_at`
+        FROM `note_ai_config` WHERE `id` = 1
+    </select>
+
+    <!-- 前端读到的永远是掩码，用户不改密钥时不会提交 apiKey：空 = 沿用旧密钥，不是清空 -->
+    <update id="updateAiConfigKeepKey">
+        UPDATE `note_ai_config`
+        SET `endpoint` = #{endpoint}, `model` = #{model}, `max_chars` = #{maxChars},
+            `updated_by` = #{adminId}
+        WHERE `id` = 1
+    </update>
+
+    <update id="updateAiConfigWithKey">
+        UPDATE `note_ai_config`
+        SET `endpoint` = #{endpoint}, `model` = #{model}, `max_chars` = #{maxChars},
+            `api_key` = #{apiKey}, `updated_by` = #{adminId}
+        WHERE `id` = 1
+    </update>
+
+    <!-- ================================================================ 系统公告 -->
+
+    <sql id="announcementSelect">
+        SELECT `id`, `title`, `content`, `enabled`, `created_at` FROM `note_system_announcement`
+    </sql>
+
+    <select id="countAnnouncements" resultType="long">
+        SELECT COUNT(*) FROM `note_system_announcement`
+    </select>
+
+    <select id="listAnnouncements" resultType="map">
+        <include refid="announcementSelect"/>
+        ORDER BY `created_at` DESC, `id` DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="findAnnouncement" resultType="NoteSystemAnnouncement">
+        <include refid="announcementSelect"/>
+        WHERE `id` = #{id}
+    </select>
+
+    <!-- 公告数量天然很少，一次全给前端，不必为了统一而强行分页 -->
+    <select id="listPublishedAnnouncements" resultType="map">
+        <include refid="announcementSelect"/>
+        WHERE `enabled` = 1 ORDER BY `created_at` DESC, `id` DESC
+    </select>
+
+    <!-- 自增主键由驱动回填到实体 id；不能靠再查 LAST_INSERT_ID()，连接池里可能是另一条连接 -->
+    <insert id="insertAnnouncement" parameterType="NoteSystemAnnouncement"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `note_system_announcement` (`title`, `content`, `admin_id`, `enabled`)
+        VALUES (#{title}, #{content}, #{adminId}, #{enabled})
+    </insert>
+
+    <update id="updateAnnouncement">
+        UPDATE `note_system_announcement`
+        SET `title` = #{title}, `content` = #{content}, `enabled` = #{enabled}
+        WHERE `id` = #{id}
+    </update>
+
+    <delete id="deleteAnnouncement">
+        DELETE FROM `note_system_announcement` WHERE `id` = #{id}
+    </delete>
+
+</mapper>

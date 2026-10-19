@@ -36,7 +36,7 @@ USE `CipherWS`;
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `note_user` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '用户 ID',
-    `username`    VARCHAR(20)  NOT NULL COMMENT '账号，3-20 位字母数字下划线',
+    `username`    VARCHAR(20)  NOT NULL COMMENT '账号，2-20 个字符，可用中文/字母/数字/下划线',
     `password`    VARCHAR(100) NOT NULL COMMENT 'BCrypt 密码摘要，禁止明文',
     `role`        VARCHAR(16)  NOT NULL DEFAULT 'user' COMMENT '角色：user / admin',
     `enabled`     TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '是否启用，0 禁用后不能登录',

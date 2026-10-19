@@ -1,6 +1,7 @@
 package org.example.cipherws.note.core.service.impl;
 
-import jakarta.annotation.Resource;
+import org.example.cipherws.note.common.entity.Note;
+import org.example.cipherws.note.common.entity.NoteAiSummaryRecord;
 import org.example.cipherws.note.common.exception.BusinessException;
 import org.example.cipherws.note.common.result.Result;
 import org.example.cipherws.note.core.dto.NoteDtos.NoteDetailVo;
@@ -8,22 +9,12 @@ import org.example.cipherws.note.core.dto.NoteDtos.NoteSaveRequest;
 import org.example.cipherws.note.core.dto.NoteDtos.NoteVo;
 import org.example.cipherws.note.core.dto.NoteDtos.SummaryVo;
 import org.example.cipherws.note.core.dto.NoteDtos.TagBrief;
+import org.example.cipherws.note.core.mapper.NoteMapper;
 import org.example.cipherws.note.core.service.NoteService;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowCallbackHandler;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
-import java.sql.Timestamp;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -31,14 +22,16 @@ import java.util.Map;
 import java.util.Objects;
 
 /**
- * 笔记业务实现，只用 JdbcTemplate（不引 MyBatis / JPA，多一层映射没换来收益）。
+ * 笔记业务实现。数据访问全部走 {@link NoteMapper}（MyBatis），
+ * 这一层只负责业务判断：校验、默认值、分页夹取、排序、异常文案。SQL 不在这个文件里。
  *
- * <p>全文件三个固定做法：</p>
+ * <p>三个固定做法：</p>
  * <ul>
- *   <li>每条 SQL 都带 {@code user_id} 条件。需求 6.2.2 要求越权被拦下，用 WHERE
+ *   <li>每条数据访问都带 {@code userId} 条件。需求 6.2.2 要求越权被拦下，用 WHERE
  *       拦比「先查出来再判断」少一步，也不会因为漏写判断而放行；</li>
- *   <li>表名一律反引号：{@code `note`} 与 mysql 系统库同名，不包准踩坑；</li>
- *   <li>值全部走 {@code ?} 占位符，SQL 片段只拼接固定的列名与占位符个数。</li>
+ *   <li>表名一律反引号，已全部收进 XML：{@code `note`} / {@code `note_tag`} /
+ *       {@code `note_ai_summary_record`}；</li>
+ *   <li>值全部走 Mapper 的命名参数，没有一处字符串拼接。</li>
  * </ul>
  */
 @Service
@@ -53,45 +46,28 @@ public class NoteServiceImpl implements NoteService {
     private static final int MAX_PAGE_SIZE = 100;
     private static final int DEFAULT_PAGE_SIZE = 10;
 
-    /** 列表与详情共用的列，避免两处 select 的字段悄悄跑偏 */
-    private static final String NOTE_COLUMNS =
-            "`id`, `title`, `content`, `status`, `flagged`, `created_at`, `updated_at`";
+    /** note.deleted 的两个取值，顺手给个名字，免得列表与回收站调用处出现魔数 */
+    private static final int NOT_DELETED = 0;
+    private static final int DELETED = 1;
 
-    @Resource
-    private JdbcTemplate jdbcTemplate;
+    private final NoteMapper noteMapper;
+
+    public NoteServiceImpl(NoteMapper noteMapper) {
+        this.noteMapper = noteMapper;
+    }
 
     @Override
     public Result listNotes(long userId, String keyword, String status, Long tagId, int page, int size) {
-        StringBuilder where = new StringBuilder(" WHERE n.`user_id` = ? AND n.`deleted` = 0");
-        List<Object> args = new ArrayList<>();
-        args.add(userId);
-
+        // LIKE 的 % / _ 转义留在这一层：占位符已经防了注入，这里防的是「搜 100% 却什么都命中」
         String like = likePattern(keyword);
-        if (like != null) {
-            where.append(" AND (n.`title` LIKE ? OR n.`content` LIKE ?)");
-            args.add(like);
-            args.add(like);
-        }
+        // 认不出来的 status 当没传，别把「全部」变成「一条都没有」
         String statusFilter = normalizeStatusFilter(status);
-        if (statusFilter != null) {
-            where.append(" AND n.`status` = ?");
-            args.add(statusFilter);
-        }
-        if (tagId != null) {
-            // 用 EXISTS 而不是 JOIN：一篇笔记挂多个标签时 JOIN 会把它变成多行
-            where.append(" AND EXISTS (SELECT 1 FROM `note_tag_rel` r"
-                    + " WHERE r.`note_id` = n.`id` AND r.`tag_id` = ?)");
-            args.add(tagId);
-        }
-        return pagedNotes(userId, where, args, page, size);
+        return pagedNotes(userId, NOT_DELETED, like, statusFilter, tagId, page, size);
     }
 
     @Override
     public Result listTrashNotes(long userId, int page, int size) {
-        StringBuilder where = new StringBuilder(" WHERE n.`user_id` = ? AND n.`deleted` = 1");
-        List<Object> args = new ArrayList<>();
-        args.add(userId);
-        return pagedNotes(userId, where, args, page, size);
+        return pagedNotes(userId, DELETED, null, null, null, page, size);
     }
 
     @Override
@@ -99,11 +75,9 @@ public class NoteServiceImpl implements NoteService {
     public Result clearTrash(long userId) {
         // ai_summary_record 没有指向 note 的外键，不先手动删就会留下永远打不开的孤儿摘要，
         // 管理员统计还会把它们算进 AI 调用次数里。
-        jdbcTemplate.update("DELETE s FROM `note_ai_summary_record` s"
-                + " JOIN `note` n ON n.`id` = s.`note_id`"
-                + " WHERE n.`user_id` = ? AND n.`deleted` = 1 AND s.`user_id` = ?", userId, userId);
+        noteMapper.deleteTrashSummaries(userId);
         // note_tag_rel 的两个外键都是 ON DELETE CASCADE，关联行随笔记一起消失，不用手删
-        jdbcTemplate.update("DELETE FROM `note` WHERE `user_id` = ? AND `deleted` = 1", userId);
+        noteMapper.deleteTrashNotes(userId);
         return Result.ok(true);
     }
 
@@ -111,13 +85,9 @@ public class NoteServiceImpl implements NoteService {
     public Result getNote(long userId, long noteId) {
         NoteVo note = requireNoteVo(userId, noteId);
         // 总结历史同样带 user_id：这张表里 note_id 与 user_id 是两列，两个条件都写上才严密
-        List<SummaryVo> summaries = jdbcTemplate.query(
-                "SELECT `id`, `summary`, `created_at` FROM `note_ai_summary_record`"
-                        + " WHERE `note_id` = ? AND `user_id` = ?"
-                        + " ORDER BY `created_at` DESC, `id` DESC",
-                (rs, rowNum) -> new SummaryVo(rs.getLong("id"), rs.getString("summary"),
-                        toLocalDateTime(rs.getTimestamp("created_at"))),
-                noteId, userId);
+        List<SummaryVo> summaries = noteMapper.selectSummaries(noteId, userId).stream()
+                .map(NoteServiceImpl::toSummaryVo)
+                .toList();
         NoteDetailVo detail = new NoteDetailVo(note.id(), note.title(), note.content(), note.status(),
                 note.flagged(), note.createdAt(), note.updatedAt(), note.tags(), summaries);
         return Result.ok(detail);
@@ -126,23 +96,16 @@ public class NoteServiceImpl implements NoteService {
     @Override
     @Transactional
     public Result createNote(long userId, NoteSaveRequest request) {
-        String title = normalizeTitle(request.title());
-        String content = request.content() == null ? "" : request.content();
-        String status = normalizeStatusForWrite(request.status());
+        Note note = new Note();
+        note.setUserId(userId);
+        note.setTitle(normalizeTitle(request.title()));
+        note.setContent(request.content() == null ? "" : request.content());
+        note.setStatus(normalizeStatusForWrite(request.status()));
 
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbcTemplate.update(connection -> {
-            PreparedStatement ps = connection.prepareStatement(
-                    "INSERT INTO `note` (`user_id`, `title`, `content`, `status`) VALUES (?, ?, ?, ?)",
-                    Statement.RETURN_GENERATED_KEYS);
-            ps.setLong(1, userId);
-            ps.setString(2, title);
-            ps.setString(3, content);
-            ps.setString(4, status);
-            return ps;
-        }, keyHolder);
+        // 插入时已经配了 useGeneratedKeys，自增主键会回填到 note.id
+        noteMapper.insertNote(note);
+        long noteId = Objects.requireNonNull(note.getId(), "新建笔记未返回主键");
 
-        long noteId = Objects.requireNonNull(keyHolder.getKey(), "新建笔记未返回主键").longValue();
         bindTags(userId, noteId, request.tagIds());
         return Result.ok(requireNoteVo(userId, noteId));
     }
@@ -155,26 +118,11 @@ public class NoteServiceImpl implements NoteService {
 
         // 只更新传了的字段。前端自动保存只发自己改过的那几项，
         // 把没传的当成「清空」会把用户正文一键洗掉。
-        StringBuilder set = new StringBuilder();
-        List<Object> args = new ArrayList<>();
-        if (request.title() != null) {
-            set.append("`title` = ?, ");
-            args.add(normalizeTitle(request.title()));
-        }
-        if (request.content() != null) {
-            set.append("`content` = ?, ");
-            args.add(request.content());
-        }
-        if (request.status() != null) {
-            set.append("`status` = ?, ");
-            args.add(normalizeStatusForWrite(request.status()));
-        }
-        // 列表按 updated_at 倒序，行内容没变时 ON UPDATE 不会动它；
-        // 显式 touch 一下，只改了标签或原地保存的笔记也能排到最前面
-        set.append("`updated_at` = CURRENT_TIMESTAMP");
-        args.add(noteId);
-        args.add(userId);
-        jdbcTemplate.update("UPDATE `note` SET " + set + " WHERE `id` = ? AND `user_id` = ?", args.toArray());
+        // null 交给 XML 里的 <if> 判空跳过；updated_at 由 SQL 无条件 touch。
+        String title = request.title() == null ? null : normalizeTitle(request.title());
+        String content = request.content();
+        String status = request.status() == null ? null : normalizeStatusForWrite(request.status());
+        noteMapper.updateNoteFields(noteId, userId, title, content, status);
 
         if (request.tagIds() != null) {
             bindTags(userId, noteId, request.tagIds());
@@ -188,13 +136,11 @@ public class NoteServiceImpl implements NoteService {
         requireNoteVo(userId, noteId);
         if (hard) {
             // 永久删除：摘要没有外键约束，必须手动清；关联行由外键级联
-            jdbcTemplate.update("DELETE FROM `note_ai_summary_record` WHERE `note_id` = ? AND `user_id` = ?",
-                    noteId, userId);
-            jdbcTemplate.update("DELETE FROM `note` WHERE `id` = ? AND `user_id` = ?", noteId, userId);
+            noteMapper.deleteSummariesByNote(noteId, userId);
+            noteMapper.deleteNote(noteId, userId);
         } else {
             // 进回收站：deleted=1 + 记录进站时间，正文原样留着，恢复时不用二次编辑
-            jdbcTemplate.update("UPDATE `note` SET `deleted` = 1, `deleted_at` = CURRENT_TIMESTAMP,"
-                    + " `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ? AND `user_id` = ?", noteId, userId);
+            noteMapper.softDeleteNote(noteId, userId);
         }
         return Result.ok(true);
     }
@@ -203,8 +149,7 @@ public class NoteServiceImpl implements NoteService {
     @Transactional
     public Result restoreNote(long userId, long noteId) {
         requireNoteVo(userId, noteId);
-        jdbcTemplate.update("UPDATE `note` SET `deleted` = 0, `deleted_at` = NULL,"
-                + " `updated_at` = CURRENT_TIMESTAMP WHERE `id` = ? AND `user_id` = ?", noteId, userId);
+        noteMapper.restoreNote(noteId, userId);
         return Result.ok(true);
     }
 
@@ -214,41 +159,31 @@ public class NoteServiceImpl implements NoteService {
      * <p>total 必须单独 COUNT：LIMIT 之后拿到的是当页条数，前端分页器要的是总条数，
      * 拿当页条数算页数永远只有一页。</p>
      */
-    private Result pagedNotes(long userId, CharSequence where, List<Object> args, int page, int size) {
-        Long total = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM `note` n" + where, Long.class, args.toArray());
+    private Result pagedNotes(long userId, int deleted, String keywordPattern, String status,
+                              Long tagId, int page, int size) {
+        long total = noteMapper.countNotes(userId, deleted, keywordPattern, status, tagId);
 
         int limit = normalizeSize(size);
         int offset = (normalizePage(page) - 1) * limit;
-        List<Object> pageArgs = new ArrayList<>(args);
-        pageArgs.add(limit);
-        pageArgs.add(offset);
 
-        List<NoteVo> rows = jdbcTemplate.query(
-                "SELECT " + NOTE_COLUMNS + " FROM `note` n" + where
-                        + " ORDER BY n.`updated_at` DESC, n.`id` DESC LIMIT ? OFFSET ?",
-                (rs, rowNum) -> toNoteVo(rs), pageArgs.toArray());
+        List<Note> rows = noteMapper.selectNotes(userId, deleted, keywordPattern, status, tagId, limit, offset);
 
         // 当页笔记的标签一次查回来，避免每条笔记再查一次（N+1）
-        Map<Long, List<TagBrief>> tagsByNote = loadTags(userId, rows.stream().map(NoteVo::id).toList());
+        Map<Long, List<TagBrief>> tagsByNote = loadTags(userId, rows.stream().map(Note::getId).toList());
         List<NoteVo> notes = rows.stream()
-                .map(n -> new NoteVo(n.id(), n.title(), n.content(), n.status(), n.flagged(),
-                        n.createdAt(), n.updatedAt(), tagsByNote.getOrDefault(n.id(), List.of())))
+                .map(n -> toNoteVo(n, tagsByNote.getOrDefault(n.getId(), List.of())))
                 .toList();
-        return Result.ok(notes, total == null ? 0L : total);
+        return Result.ok(notes, total);
     }
 
     /** 取笔记并校验归属：不存在与不属于当前用户，对调用方都是「笔记不存在」（不泄露别人有没有这条数据） */
     private NoteVo requireNoteVo(long userId, long noteId) {
-        List<NoteVo> found = jdbcTemplate.query(
-                "SELECT " + NOTE_COLUMNS + " FROM `note` n WHERE n.`id` = ? AND n.`user_id` = ?",
-                (rs, rowNum) -> toNoteVo(rs), noteId, userId);
-        if (found.isEmpty()) {
+        Note found = noteMapper.selectNoteById(noteId, userId);
+        if (found == null) {
             throw new BusinessException("笔记不存在");
         }
-        NoteVo note = found.get(0);
         List<TagBrief> tags = loadTags(userId, List.of(noteId)).getOrDefault(noteId, List.of());
-        return new NoteVo(note.id(), note.title(), note.content(), note.status(), note.flagged(),
-                note.createdAt(), note.updatedAt(), tags);
+        return toNoteVo(found, tags);
     }
 
     /**
@@ -262,7 +197,7 @@ public class NoteServiceImpl implements NoteService {
      * 也不用额外再查一次「这标签是不是我的」。</p>
      */
     private void bindTags(long userId, long noteId, List<Long> tagIds) {
-        jdbcTemplate.update("DELETE FROM `note_tag_rel` WHERE `note_id` = ?", noteId);
+        noteMapper.deleteTagRelations(noteId);
         if (tagIds == null || tagIds.isEmpty()) {
             return;
         }
@@ -271,50 +206,52 @@ public class NoteServiceImpl implements NoteService {
             if (tagId == null) {
                 continue;
             }
-            jdbcTemplate.update("INSERT INTO `note_tag_rel` (`note_id`, `tag_id`)"
-                            + " SELECT ?, `id` FROM `note_tag` WHERE `id` = ? AND `user_id` = ?",
-                    noteId, tagId, userId);
+            noteMapper.insertTagRelation(noteId, tagId, userId);
         }
     }
 
     /**
      * 批量取标签，返回 noteId → 标签列表。
      *
-     * <p>note_tag_rel 本身不带 user_id，所以关联到 {@code tag} 表后用
+     * <p>note_tag_rel 本身不带 user_id，所以关联到 {@code note_tag} 表后用
      * {@code t.user_id} 再兜一层，防止关联表里出现别人的标签。</p>
+     *
+     * <p>查询用的是 {@code resultType="map"}，**key 是原始列名**：
+     * {@code note_id} / {@code id} / {@code name}。map-underscore-to-camel-case
+     * 只作用于实体属性，对 Map 不生效，所以这里读的是带下划线的 key。</p>
      */
     private Map<Long, List<TagBrief>> loadTags(long userId, List<Long> noteIds) {
         Map<Long, List<TagBrief>> grouped = new LinkedHashMap<>();
         if (noteIds == null || noteIds.isEmpty()) {
             return grouped;
         }
-        String placeholders = String.join(", ", Collections.nCopies(noteIds.size(), "?"));
-        List<Object> args = new ArrayList<>(noteIds);
-        args.add(userId);
-        String sql = "SELECT r.`note_id`, t.`id`, t.`name` FROM `note_tag_rel` r"
-                + " JOIN `note_tag` t ON t.`id` = r.`tag_id`"
-                + " WHERE r.`note_id` IN (" + placeholders + ") AND t.`user_id` = ?";
-        RowCallbackHandler collector = rs -> grouped
-                .computeIfAbsent(rs.getLong("note_id"), key -> new ArrayList<>())
-                .add(new TagBrief(rs.getLong("id"), rs.getString("name")));
-        jdbcTemplate.query(sql, collector, args.toArray());
+        for (Map<String, Object> row : noteMapper.selectNoteTags(noteIds, userId)) {
+            Long noteId = toLong(row.get("note_id"));
+            grouped.computeIfAbsent(noteId, key -> new ArrayList<>())
+                    .add(new TagBrief(toLong(row.get("id")), (String) row.get("name")));
+        }
         return grouped;
     }
 
-    private static NoteVo toNoteVo(ResultSet rs) throws SQLException {
+    private static NoteVo toNoteVo(Note note, List<TagBrief> tags) {
         return new NoteVo(
-                rs.getLong("id"),
-                rs.getString("title"),
-                rs.getString("content"),
-                rs.getString("status"),
-                rs.getBoolean("flagged"),
-                toLocalDateTime(rs.getTimestamp("created_at")),
-                toLocalDateTime(rs.getTimestamp("updated_at")),
-                List.of());
+                note.getId(),
+                note.getTitle(),
+                note.getContent(),
+                note.getStatus(),
+                note.getFlagged(),
+                note.getCreatedAt(),
+                note.getUpdatedAt(),
+                tags);
     }
 
-    private static LocalDateTime toLocalDateTime(Timestamp timestamp) {
-        return timestamp == null ? null : timestamp.toLocalDateTime();
+    private static SummaryVo toSummaryVo(NoteAiSummaryRecord record) {
+        return new SummaryVo(record.getId(), record.getSummary(), record.getCreatedAt());
+    }
+
+    /** Map 结果里的数字列可能是 Long / Integer / BigInteger，统一按 Number 取 long */
+    private static Long toLong(Object value) {
+        return value == null ? null : ((Number) value).longValue();
     }
 
     /** 空标题兜底：列表页没有标题就没法点开，前端也依赖后端回填后的标题 */

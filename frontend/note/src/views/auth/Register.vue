@@ -4,7 +4,7 @@
       <AppField
         v-model="form.username"
         label="账号"
-        placeholder="3-20 位字母、数字或下划线"
+        placeholder="2-20 个字符，可用中文、字母、数字、下划线"
         :error="errors.username"
         required
         @submit="onSubmit"
@@ -69,9 +69,10 @@ const formError = ref('')
 const loading = ref(false)
 
 function validate() {
-  errors.username = /^[a-zA-Z0-9_]{3,20}$/.test(form.username.trim())
+  // 与后端保持一致：2-20 个字符，允许中文、字母、数字、下划线
+  errors.username = /^[\u4e00-\u9fa5A-Za-z0-9_]{2,20}$/.test(form.username.trim())
     ? ''
-    : '账号需为 3-20 位字母、数字或下划线'
+    : '账号需为 2-20 个字符，可用中文、字母、数字或下划线'
   errors.email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) ? '' : '邮箱格式不正确'
   errors.password = form.password.length >= 6 ? '' : '密码至少 6 位'
   errors.confirm = form.confirm === form.password ? '' : '两次输入的密码不一致'

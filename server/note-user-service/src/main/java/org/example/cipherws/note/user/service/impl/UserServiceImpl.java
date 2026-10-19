@@ -1,40 +1,56 @@
 package org.example.cipherws.note.user.service.impl;
 
+import org.example.cipherws.note.common.entity.NoteUser;
 import org.example.cipherws.note.common.exception.BusinessException;
 import org.example.cipherws.note.common.security.JwtUtil;
 import org.example.cipherws.note.user.dto.UserDtos.LoginRes;
 import org.example.cipherws.note.user.dto.UserDtos.SendCodeRes;
 import org.example.cipherws.note.user.dto.UserDtos.UserVo;
+import org.example.cipherws.note.user.mapper.UserMapper;
 import org.example.cipherws.note.user.service.UserService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
-import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
- * 用户服务实现。SQL 全部显式写在下面，不用 ORM —— 每条语句在做什么一目了然。
+ * 用户服务实现。
+ *
+ * 数据访问全部走 {@link UserMapper}（MyBatis），这一层只负责业务判断：
+ * 校验、加密、签发令牌、写日志。SQL 不在这个文件里。
  */
 @Service
 public class UserServiceImpl implements UserService {
 
-    private static final Pattern USERNAME = Pattern.compile("^[a-zA-Z0-9_]{3,20}$");
+    /**
+     * 账号允许的字符：中文、英文字母、数字、下划线。
+     *
+     * 支持中文是明确需求，所以不能再用 ^[a-zA-Z0-9_]+$ 把汉字挡在外面。
+     * 范围取 CJK 基本汉字区（\u4e00-\u9fa5），覆盖 99% 的常用汉字；
+     * 生僻字（扩展 B 区以后）在补充平面，用 char 表示会是代理对，
+     * 需要 Pattern.UNICODE_CHARACTER_CLASS + \p{IsHan}，这里刻意不做，
+     * 只保证「常用中文账号能用」，避免把校验写得太玄。
+     */
+    private static final Pattern USERNAME_ALLOWED = Pattern.compile("^[\\u4e00-\\u9fa5A-Za-z0-9_]+$");
+    private static final int USERNAME_MIN = 2;
+    private static final int USERNAME_MAX = 20;
     private static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
+
     // 统一用 ISO 8601（2026-10-01T14:20:00）。
     // 不能用 "yyyy-MM-dd HH:mm:ss" 的空格格式：那个在 Safari / iOS 上
     // new Date() 会返回 Invalid Date，前端「3 天前」这类相对时间就全成了空白。
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
 
-    private final JdbcTemplate jdbc;
+    /** 新用户初始 AI 额度 */
+    private static final int INITIAL_QUOTA = 5;
+
+    private final UserMapper userMapper;
 
     /** 只在用户服务里用，所以不放公共模块 */
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder(10);
@@ -63,30 +79,24 @@ public class UserServiceImpl implements UserService {
     @Value("${note.auth.expose-code:true}")
     private boolean exposeCode;
 
-    public UserServiceImpl(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public UserServiceImpl(UserMapper userMapper) {
+        this.userMapper = userMapper;
     }
-
-    private static final RowMapper<UserVo> USER_VO = (rs, i) -> new UserVo(
-            rs.getLong("id"),
-            rs.getString("username"),
-            rs.getString("nickname"),
-            rs.getString("email"),
-            rs.getString("role"),
-            rs.getString("avatar"),
-            rs.getString("bio"),
-            rs.getInt("ai_quota"),
-            rs.getBoolean("enabled"),
-            rs.getTimestamp("created_at") == null ? null
-                    : rs.getTimestamp("created_at").toLocalDateTime().format(TIME_FMT));
 
     @Override
     public UserVo register(String username, String password, String email) {
         String name = username == null ? "" : username.trim();
         String mail = email == null ? "" : email.trim();
 
-        if (!USERNAME.matcher(name).matches()) {
-            throw new BusinessException("账号需为 3-20 位字母、数字或下划线");
+        // 长度按「字符数」算，与建表时 VARCHAR(20) 的口径一致（MySQL 的
+        // VARCHAR(20) 指 20 个字符而不是 20 字节，一个汉字占 1 个字符）。
+        // 用 codePointCount 而不是 name.length()：后者会把代理对算成 2。
+        int nameLen = name.codePointCount(0, name.length());
+        if (nameLen < USERNAME_MIN || nameLen > USERNAME_MAX) {
+            throw new BusinessException("账号需为 2-20 个字符");
+        }
+        if (!USERNAME_ALLOWED.matcher(name).matches()) {
+            throw new BusinessException("账号只能包含中文、字母、数字或下划线");
         }
         if (password == null || password.length() < 6) {
             throw new BusinessException("密码至少 6 位");
@@ -94,50 +104,55 @@ public class UserServiceImpl implements UserService {
         if (!EMAIL.matcher(mail).matches()) {
             throw new BusinessException("邮箱格式不正确");
         }
-        if (countByUsername(name) > 0) {
+        // 先查一次是为了给出友好提示；真正的唯一性靠数据库唯一索引兜底
+        if (userMapper.countByUsername(name) > 0) {
             throw new BusinessException("该账号已被注册");
         }
 
+        NoteUser user = new NoteUser();
+        user.setUsername(name);
+        user.setPassword(passwordEncoder.encode(password));
+        user.setRole("user");
+        user.setEnabled(true);
+        user.setEmail(mail);
+        // 没填昵称时先用账号名占位，用户可以在资料页改
+        user.setNickname(name);
+        user.setAvatar("");
+        user.setBio("");
+        user.setAiQuota(INITIAL_QUOTA);
+
         try {
-            jdbc.update("""
-                    INSERT INTO `note_user` (username, password, role, enabled, email, nickname, ai_quota)
-                    VALUES (?, ?, 'user', 1, ?, ?, 5)
-                    """, name, passwordEncoder.encode(password), mail, name);
+            userMapper.insert(user);
         } catch (DuplicateKeyException e) {
             // 并发下两个人同时注册同一个账号时，唯一索引会在这里兜住
             throw new BusinessException("该账号已被注册");
         }
-
-        List<UserVo> created = jdbc.query(
-                "SELECT * FROM `note_user` WHERE username = ?", USER_VO, name);
-        return created.get(0);
+        // insert 已经把自增 id 回填进实体，但创建时间等列还是空，统一回查一次
+        return toVo(userMapper.findById(user.getId()));
     }
 
     @Override
     public LoginRes login(String username, String password) {
         String name = username == null ? "" : username.trim();
-        List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT id, password, role, enabled FROM `note_user` WHERE username = ?", name);
-        if (rows.isEmpty()) {
+        NoteUser user = userMapper.findByUsername(name);
+        if (user == null) {
             // 不区分「账号不存在」与「密码错误」，避免被用来枚举账号
             throw new BusinessException("账号或密码不正确");
         }
-        Map<String, Object> row = rows.get(0);
 
         // 账号被禁用时必须给出明确原因（需求 4.2.3），否则用户永远不知道发生了什么
-        if (!Boolean.TRUE.equals(toBool(row.get("enabled")))) {
+        if (!Boolean.TRUE.equals(user.getEnabled())) {
             throw new BusinessException("该账号已被禁用，请联系管理员");
         }
-        if (!passwordEncoder.matches(password == null ? "" : password, String.valueOf(row.get("password")))) {
+        if (!passwordEncoder.matches(password == null ? "" : password, user.getPassword())) {
             throw new BusinessException("账号或密码不正确");
         }
 
-        long userId = ((Number) row.get("id")).longValue();
-        String role = String.valueOf(row.get("role"));
-        String token = JwtUtil.sign(userId, name, role, jwtSecret, jwtTtlSeconds);
+        String token = JwtUtil.sign(user.getId(), user.getUsername(), user.getRole(),
+                jwtSecret, jwtTtlSeconds);
 
-        writeUserLog(userId, "登录", "账号登录成功");
-        return new LoginRes(token, profile(userId));
+        writeUserLog(user.getId(), "登录", "账号登录成功");
+        return new LoginRes(token, profile(user.getId()));
     }
 
     @Override
@@ -146,7 +161,7 @@ public class UserServiceImpl implements UserService {
         if (!EMAIL.matcher(mail).matches()) {
             throw new BusinessException("邮箱格式不正确");
         }
-        if (countByEmail(mail) == 0) {
+        if (userMapper.countByEmail(mail) == 0) {
             throw new BusinessException("该邮箱未注册");
         }
 
@@ -181,8 +196,7 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("验证码不正确");
         }
 
-        int updated = jdbc.update("UPDATE `note_user` SET password = ? WHERE email = ?",
-                passwordEncoder.encode(newPassword), mail);
+        int updated = userMapper.updatePasswordByEmail(mail, passwordEncoder.encode(newPassword));
         if (updated == 0) {
             throw new BusinessException("该邮箱未注册");
         }
@@ -192,11 +206,11 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public UserVo profile(long userId) {
-        List<UserVo> rows = jdbc.query("SELECT * FROM `note_user` WHERE id = ?", USER_VO, userId);
-        if (rows.isEmpty()) {
+        NoteUser user = userMapper.findById(userId);
+        if (user == null) {
             throw new BusinessException("用户不存在");
         }
-        return rows.get(0);
+        return toVo(user);
     }
 
     @Override
@@ -221,9 +235,7 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("个人简介最多 120 个字符");
         }
 
-        jdbc.update("""
-                UPDATE `note_user` SET nickname = ?, email = ?, bio = ?, avatar = ? WHERE id = ?
-                """, name, mail, intro, pic, userId);
+        userMapper.updateProfile(userId, name, mail, intro, pic);
         return profile(userId);
     }
 
@@ -233,8 +245,7 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("新密码至少 6 位");
         }
 
-        String stored = jdbc.queryForObject(
-                "SELECT password FROM `note_user` WHERE id = ?", String.class, userId);
+        String stored = userMapper.findPasswordById(userId);
         if (stored == null || !passwordEncoder.matches(oldPassword == null ? "" : oldPassword, stored)) {
             throw new BusinessException("原密码不正确");
         }
@@ -242,42 +253,37 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("新密码不能与原密码相同");
         }
 
-        jdbc.update("UPDATE `note_user` SET password = ? WHERE id = ?",
-                passwordEncoder.encode(newPassword), userId);
+        userMapper.updatePassword(userId, passwordEncoder.encode(newPassword));
     }
 
     /* ------------------------------ 内部工具 ------------------------------ */
 
-    private int countByUsername(String username) {
-        Integer n = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM `note_user` WHERE username = ?", Integer.class, username);
-        return n == null ? 0 : n;
-    }
-
-    private int countByEmail(String email) {
-        Integer n = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM `note_user` WHERE email = ?", Integer.class, email);
-        return n == null ? 0 : n;
+    /**
+     * 实体 -> 对外 VO。
+     *
+     * 这一步看着啰嗦，但它是**唯一**能保证 password 不外泄的地方：
+     * 实体里有密码摘要，VO 里根本没有这个字段，转换时不可能带出去。
+     */
+    private static UserVo toVo(NoteUser u) {
+        return new UserVo(
+                u.getId(),
+                u.getUsername(),
+                u.getNickname(),
+                u.getEmail(),
+                u.getRole(),
+                u.getAvatar(),
+                u.getBio(),
+                u.getAiQuota(),
+                u.getEnabled(),
+                u.getCreatedAt() == null ? null : u.getCreatedAt().format(TIME_FMT));
     }
 
     /** 登录等行为要落日志（需求 4.7.1）。日志失败不能影响主流程，所以单独 try。 */
     private void writeUserLog(long userId, String type, String detail) {
         try {
-            jdbc.update("""
-                    INSERT INTO note_user_operation_log (user_id, type, detail, ip) VALUES (?, ?, ?, ?)
-                    """, userId, type, detail, "");
+            userMapper.insertUserLog(userId, type, detail, "");
         } catch (Exception ignored) {
             // 日志表不可用不应该让用户登不上
         }
-    }
-
-    private static Boolean toBool(Object v) {
-        if (v instanceof Boolean b) {
-            return b;
-        }
-        if (v instanceof Number n) {
-            return n.intValue() != 0;
-        }
-        return false;
     }
 }

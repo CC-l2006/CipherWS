@@ -1,23 +1,23 @@
 package org.example.cipherws.note.core.service.impl;
 
-import jakarta.annotation.Resource;
+import org.example.cipherws.note.common.entity.NoteTag;
 import org.example.cipherws.note.common.exception.BusinessException;
 import org.example.cipherws.note.common.result.Result;
 import org.example.cipherws.note.core.dto.NoteDtos.TagSaveRequest;
 import org.example.cipherws.note.core.dto.NoteDtos.TagVo;
+import org.example.cipherws.note.core.mapper.TagMapper;
 import org.example.cipherws.note.core.service.TagService;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
- * 标签业务实现。
+ * 标签业务实现。数据访问全部走 {@link TagMapper}（MyBatis），
+ * 这一层只负责业务判断：名称校验、重名文案、异常文案。SQL 不在这个文件里。
  *
  * <p>标签是用户私有数据（需求 7.4），所以「这个标签是不是我的」这件事
  * 在每个写操作前都要单独确认一次，出错信息才有意义（「标签不存在」）。</p>
@@ -28,40 +28,34 @@ public class TagServiceImpl implements TagService {
     /** tag.name 是 VARCHAR(12)：提前在服务层拦，别让数据库抛 Data too long */
     private static final int MAX_TAG_NAME_LENGTH = 12;
 
-    /**
-     * 标签列表项的统一查询片段，列表 / 新建 / 改名三处共用。
-     *
-     * <p>noteCount 用关联子查询算：只数当前用户、未删除的笔记 ——
-     * 回收站里的笔记如果算进去，标签数量会虚高，用户点进去却看不到那么多。</p>
-     */
-    private static final String TAG_SELECT = "SELECT t.`id`, t.`name`, t.`created_at`,"
-            + " (SELECT COUNT(*) FROM `note_tag_rel` r JOIN `note` n ON n.`id` = r.`note_id`"
-            + " WHERE r.`tag_id` = t.`id` AND n.`user_id` = t.`user_id` AND n.`deleted` = 0) AS `note_count`"
-            + " FROM `note_tag` t";
+    private final TagMapper tagMapper;
 
-    @Resource
-    private JdbcTemplate jdbcTemplate;
+    public TagServiceImpl(TagMapper tagMapper) {
+        this.tagMapper = tagMapper;
+    }
 
     @Override
     public Result listTags(long userId) {
-        List<TagVo> tags = jdbcTemplate.query(
-                TAG_SELECT + " WHERE t.`user_id` = ? ORDER BY t.`created_at` ASC, t.`id` ASC",
-                (rs, rowNum) -> toTagVo(rs), userId);
+        List<TagVo> tags = tagMapper.selectTagsByUser(userId).stream()
+                .map(TagServiceImpl::toTagVo)
+                .toList();
         return Result.ok(tags, (long) tags.size());
     }
 
     @Override
     public Result createTag(long userId, TagSaveRequest request) {
         String name = normalizeName(request.name());
+        NoteTag tag = new NoteTag();
+        tag.setUserId(userId);
+        tag.setName(name);
         try {
-            jdbcTemplate.update("INSERT INTO `note_tag` (`user_id`, `name`) VALUES (?, ?)", userId, name);
+            tagMapper.insertTag(tag);
         } catch (DuplicateKeyException e) {
             // 唯一键就是 (user_id, name)：交给数据库判定重名，先查再插在并发下会两边都插进去
             throw new BusinessException("同名标签已存在");
         }
         // 唯一键保证这里查到的就是刚插进去的那一行
-        return Result.ok(jdbcTemplate.queryForObject(TAG_SELECT + " WHERE t.`user_id` = ? AND t.`name` = ?",
-                (rs, rowNum) -> toTagVo(rs), userId, name));
+        return Result.ok(toTagVo(tagMapper.selectTagByName(userId, name)));
     }
 
     @Override
@@ -69,13 +63,11 @@ public class TagServiceImpl implements TagService {
         requireOwnedTag(userId, tagId);
         String name = normalizeName(request.name());
         try {
-            jdbcTemplate.update("UPDATE `note_tag` SET `name` = ? WHERE `id` = ? AND `user_id` = ?",
-                    name, tagId, userId);
+            tagMapper.updateTagName(tagId, userId, name);
         } catch (DuplicateKeyException e) {
             throw new BusinessException("同名标签已存在");
         }
-        return Result.ok(jdbcTemplate.queryForObject(TAG_SELECT + " WHERE t.`id` = ? AND t.`user_id` = ?",
-                (rs, rowNum) -> toTagVo(rs), tagId, userId));
+        return Result.ok(toTagVo(tagMapper.selectTagById(tagId, userId)));
     }
 
     @Override
@@ -84,15 +76,13 @@ public class TagServiceImpl implements TagService {
         // 需求 4.5.3：删标签只解除关联，绝不删笔记。
         // note_tag_rel 的两个外键都是 ON DELETE CASCADE，删 tag 时关联行自动清掉，
         // 所以这里只需要删 tag 自己 —— 反过来从关联行去删 note 是绝对不能做的。
-        jdbcTemplate.update("DELETE FROM `note_tag` WHERE `id` = ? AND `user_id` = ?", tagId, userId);
+        tagMapper.deleteTag(tagId, userId);
         return Result.ok(true);
     }
 
     /** 删改前的归属校验：别人家的 tagId 一律当作不存在 */
     private void requireOwnedTag(long userId, long tagId) {
-        Long count = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM `note_tag` WHERE `id` = ? AND `user_id` = ?", Long.class, tagId, userId);
-        if (count == null || count == 0) {
+        if (tagMapper.countOwnedTag(tagId, userId) == 0) {
             throw new BusinessException("标签不存在");
         }
     }
@@ -114,15 +104,38 @@ public class TagServiceImpl implements TagService {
         return trimmed;
     }
 
-    private static TagVo toTagVo(ResultSet rs) throws SQLException {
+    /**
+     * Map 行 -> 对外 VO。
+     *
+     * <p>XML 里这几条 select 用的是 {@code resultType="map"}（列表项要带算出来的
+     * {@code note_count}，不是实体字段），所以拿到的 **key 是原始列名**：
+     * {@code id} / {@code name} / {@code created_at} / {@code note_count}。
+     * map-underscore-to-camel-case 对 Map 不生效，别写成 createdAt。</p>
+     */
+    private static TagVo toTagVo(Map<String, Object> row) {
         return new TagVo(
-                rs.getLong("id"),
-                rs.getString("name"),
-                toLocalDateTime(rs.getTimestamp("created_at")),
-                rs.getLong("note_count"));
+                toLong(row.get("id")),
+                (String) row.get("name"),
+                toLocalDateTime(row.get("created_at")),
+                toLong(row.get("note_count")));
     }
 
-    private static LocalDateTime toLocalDateTime(Timestamp timestamp) {
-        return timestamp == null ? null : timestamp.toLocalDateTime();
+    /** Map 结果里的数字列可能是 Long / Integer / BigInteger，统一按 Number 取 long */
+    private static Long toLong(Object value) {
+        return value == null ? null : ((Number) value).longValue();
+    }
+
+    /** Map 结果里的 DATETIME 由 MyBatis 的默认类型处理器取成 Timestamp，这里转成 java.time */
+    private static LocalDateTime toLocalDateTime(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Timestamp timestamp) {
+            return timestamp.toLocalDateTime();
+        }
+        if (value instanceof LocalDateTime dateTime) {
+            return dateTime;
+        }
+        throw new IllegalStateException("无法识别的时间类型：" + value.getClass().getName());
     }
 }

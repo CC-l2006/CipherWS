@@ -3,12 +3,15 @@ package org.example.cipherws.note.ai.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.cipherws.note.ai.dto.AiDtos.SummaryVo;
+import org.example.cipherws.note.ai.mapper.AiMapper;
 import org.example.cipherws.note.ai.service.AiService;
+import org.example.cipherws.note.common.entity.Note;
+import org.example.cipherws.note.common.entity.NoteAiConfig;
+import org.example.cipherws.note.common.entity.NoteAiSummaryRecord;
 import org.example.cipherws.note.common.exception.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
@@ -29,6 +32,10 @@ import java.util.Map;
  *
  * 代价是 note-ai-service 与 note 表结构耦合了。如果以后要真正拆库，
  * 应该把读正文这一步换成 Feign 契约（放到 note-common 里即可）。
+ *
+ * 数据访问全部走 {@link AiMapper}（MyBatis）：这一层只管业务顺序
+ * （校验 → 调模型 → 扣额度 → 落记录 → 写日志），SQL 与结果集映射都在
+ * resources/mapper/AiMapper.xml 里。
  */
 @Service
 public class AiServiceImpl implements AiService {
@@ -38,27 +45,37 @@ public class AiServiceImpl implements AiService {
     private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ISO_LOCAL_DATE_TIME;
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    private final JdbcTemplate jdbc;
+    /** 一次总结固定消耗 1 次额度（需求 4.4.4）。落库与回传都用这个常量，避免两处对不上。 */
+    private static final int QUOTA_COST = 1;
+
+    /** 配置表里 max_chars 的兜底值，与建表默认值一致 */
+    private static final int DEFAULT_MAX_CHARS = 1200;
+
+    /** 传给模型的原文片段在记录表里的长度上限，列是 VARCHAR(500) */
+    private static final int SNIPPET_MAX_LEN = 500;
+
+    private final AiMapper aiMapper;
     private final RestClient http = RestClient.create();
 
-    public AiServiceImpl(JdbcTemplate jdbc) {
-        this.jdbc = jdbc;
+    public AiServiceImpl(AiMapper aiMapper) {
+        this.aiMapper = aiMapper;
     }
 
     @Override
     public SummaryVo summarize(long userId, long noteId) {
-        Map<String, Object> note = requireOwnedNote(userId, noteId);
-        String content = String.valueOf(note.getOrDefault("content", ""));
-        String title = String.valueOf(note.getOrDefault("title", ""));
+        Note note = requireOwnedNote(userId, noteId);
+        // 正文列允许 NULL（MEDIUMTEXT NULL），当空串处理：下面 isBlank() 会命中「正文为空」
+        String content = note.getContent() == null ? "" : note.getContent();
+        String title = note.getTitle() == null ? "" : note.getTitle();
         if (content.isBlank()) {
             throw new BusinessException("正文为空，无法生成摘要");
         }
 
-        Map<String, Object> config = aiConfig();
-        String endpoint = String.valueOf(config.getOrDefault("endpoint", ""));
-        String apiKey = String.valueOf(config.getOrDefault("api_key", ""));
-        String model = String.valueOf(config.getOrDefault("model", ""));
-        int maxChars = ((Number) config.getOrDefault("max_chars", 1200)).intValue();
+        NoteAiConfig config = aiConfig();
+        String endpoint = config.getEndpoint() == null ? "" : config.getEndpoint();
+        String apiKey = config.getApiKey() == null ? "" : config.getApiKey();
+        String model = config.getModel() == null ? "" : config.getModel();
+        int maxChars = config.getMaxChars() == null ? DEFAULT_MAX_CHARS : config.getMaxChars();
 
         if (apiKey.isBlank()) {
             // 明确告诉管理员该去哪配，而不是抛一个看不懂的 500
@@ -69,26 +86,29 @@ public class AiServiceImpl implements AiService {
         String input = content.length() > maxChars ? content.substring(0, maxChars) : content;
         String summary = callModel(endpoint, apiKey, model, title, input);
 
-        // 原子扣减：把「额度 > 0」写进 WHERE，避免并发下扣成负数
-        int deducted = jdbc.update(
-                "UPDATE `note_user` SET ai_quota = ai_quota - 1 WHERE id = ? AND ai_quota > 0", userId);
+        // 原子扣减：把「额度 > 0」写进 WHERE，避免并发下扣成负数。
+        // 只看受影响行数，不先查后改。
+        int deducted = aiMapper.deductQuota(userId);
         if (deducted == 0) {
             throw new BusinessException("AI 额度已用完，请联系管理员分配");
         }
 
-        String snippet = input.length() > 500 ? input.substring(0, 500) : input;
-        jdbc.update("""
-                INSERT INTO note_ai_summary_record (note_id, user_id, source_snippet, summary, quota_cost)
-                VALUES (?, ?, ?, ?, 1)
-                """, noteId, userId, snippet, summary);
+        String snippet = input.length() > SNIPPET_MAX_LEN ? input.substring(0, SNIPPET_MAX_LEN) : input;
+        NoteAiSummaryRecord record = new NoteAiSummaryRecord();
+        record.setNoteId(noteId);
+        record.setUserId(userId);
+        record.setSourceSnippet(snippet);
+        record.setSummary(summary);
+        record.setQuotaCost(QUOTA_COST);
+        // 自增主键由 useGeneratedKeys 回填到 record.id，省掉一次 SELECT LAST_INSERT_ID()
+        aiMapper.insertSummaryRecord(record);
+        Long recordId = record.getId();
 
-        Integer quotaLeft = jdbc.queryForObject(
-                "SELECT ai_quota FROM `note_user` WHERE id = ?", Integer.class, userId);
-        Long recordId = jdbc.queryForObject("SELECT LAST_INSERT_ID()", Long.class);
+        Integer quotaLeft = aiMapper.findAiQuota(userId);
 
         writeLog(userId, "AI 总结", "对《" + title + "》调用 AI 总结，消耗 1 次额度");
 
-        return new SummaryVo(recordId, noteId, summary, snippet, 1,
+        return new SummaryVo(recordId, noteId, summary, snippet, QUOTA_COST,
                 quotaLeft == null ? 0 : quotaLeft, now());
     }
 
@@ -96,52 +116,70 @@ public class AiServiceImpl implements AiService {
     public List<SummaryVo> history(long userId, long noteId) {
         // 先校验归属，否则能通过 noteId 读到别人的摘要
         requireOwnedNote(userId, noteId);
-        return jdbc.query("""
-                SELECT r.id, r.note_id, r.summary, r.source_snippet, r.quota_cost, r.created_at,
-                       u.ai_quota
-                FROM note_ai_summary_record r
-                JOIN `note_user` u ON u.id = r.user_id
-                WHERE r.user_id = ? AND r.note_id = ?
-                ORDER BY r.created_at DESC
-                """, (rs, i) -> new SummaryVo(
-                rs.getLong("id"),
-                rs.getLong("note_id"),
-                rs.getString("summary"),
-                rs.getString("source_snippet"),
-                rs.getInt("quota_cost"),
-                rs.getInt("ai_quota"),
-                rs.getTimestamp("created_at") == null ? null
-                        : rs.getTimestamp("created_at").toLocalDateTime().format(TIME_FMT)), userId, noteId);
+
+        List<NoteAiSummaryRecord> records = aiMapper.findSummaryRecords(userId, noteId);
+        if (records.isEmpty()) {
+            // 没有历史记录就不必再查额度：前端拿到空数组，用不到 quotaLeft
+            return List.of();
+        }
+
+        // 额度是「用户此刻的剩余次数」，不是每条记录自己的字段，
+        // 所以拆成一次单独查询，而不是让每条记录都 JOIN 一份 note_user.ai_quota。
+        Integer quota = aiMapper.findAiQuota(userId);
+        int quotaLeft = quota == null ? 0 : quota;
+
+        List<SummaryVo> list = new ArrayList<>(records.size());
+        for (NoteAiSummaryRecord r : records) {
+            list.add(toVo(r, quotaLeft));
+        }
+        return list;
     }
 
     /* ------------------------------ 内部实现 ------------------------------ */
 
-    private Map<String, Object> requireOwnedNote(long userId, long noteId) {
-        List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT id, user_id, title, content FROM `note` WHERE id = ? AND deleted = 0", noteId);
-        if (rows.isEmpty()) {
+    /**
+     * 取一篇属于自己的、未删除的笔记。
+     * 不存在与「不是你的」抛同一句文案，避免被枚举出别人有多少篇笔记。
+     */
+    private Note requireOwnedNote(long userId, long noteId) {
+        Note note = aiMapper.findActiveNoteById(noteId);
+        if (note == null) {
             throw new BusinessException("笔记不存在");
         }
-        Map<String, Object> note = rows.get(0);
-        if (((Number) note.get("user_id")).longValue() != userId) {
-            // 不区分「不存在」与「不是你的」，避免被枚举出别人有多少篇笔记
+        if (note.getUserId() == null || note.getUserId() != userId) {
             throw new BusinessException("笔记不存在");
         }
         return note;
     }
 
-    private Map<String, Object> aiConfig() {
-        List<Map<String, Object>> rows = jdbc.queryForList(
-                "SELECT endpoint, api_key, model, max_chars FROM note_ai_config WHERE id = 1");
-        if (rows.isEmpty()) {
+    private NoteAiConfig aiConfig() {
+        NoteAiConfig config = aiMapper.findAiConfig();
+        if (config == null) {
             throw new BusinessException("AI 参数未初始化，请先导入 note-schema.sql");
         }
-        return rows.get(0);
+        return config;
+    }
+
+    /**
+     * 实体 -> 对外 VO。
+     *
+     * 时间在这里才格式化：库里存 LocalDateTime，前端要的是 ISO 8601 字符串。
+     * quotaCost 为 NULL 时按 0 处理，与原来 rs.getInt() 的语义一致。
+     */
+    private static SummaryVo toVo(NoteAiSummaryRecord r, int quotaLeft) {
+        return new SummaryVo(
+                r.getId(),
+                r.getNoteId(),
+                r.getSummary(),
+                r.getSourceSnippet(),
+                r.getQuotaCost() == null ? 0 : r.getQuotaCost(),
+                quotaLeft,
+                r.getCreatedAt() == null ? null : r.getCreatedAt().format(TIME_FMT));
     }
 
     /**
      * 调用 OpenAI 兼容的 chat/completions 接口。
-     * 不绑定具体厂商：地址与模型都来自 ai_config，换模型只改后台配置。
+     * 不绑定具体厂商：地址与模型都来自 note_ai_config，换模型只改后台配置。
      */
     private String callModel(String endpoint, String apiKey, String model, String title, String input) {
         Map<String, Object> system = Map.of(
@@ -188,8 +226,7 @@ public class AiServiceImpl implements AiService {
 
     private void writeLog(long userId, String type, String detail) {
         try {
-            jdbc.update("INSERT INTO note_user_operation_log (user_id, type, detail, ip) VALUES (?, ?, ?, ?)",
-                    userId, type, detail, "");
+            aiMapper.insertUserLog(userId, type, detail, "");
         } catch (Exception ignored) {
             // 日志失败不影响总结结果
         }

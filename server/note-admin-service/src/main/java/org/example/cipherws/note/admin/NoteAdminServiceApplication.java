@@ -1,5 +1,6 @@
 package org.example.cipherws.note.admin;
 
+import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
@@ -13,8 +14,13 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * {@code org.example.cipherws.note.common} 包下，与启动类不在同一个包里。默认只扫
  * {@code org.example.cipherws.note.admin}，异常就会走 Spring 的默认错误页，
  * 前端 request.js 拿不到 {@code { success:false, errMessage }} 这个结构。</p>
+ *
+ * <p>{@code @MapperScan} 显式声明 Mapper 接口所在包：靠 {@code @Mapper} 注解自动发现也能工作，
+ * 但一旦有人把接口挪到别的包就会静默失效（运行到那条 SQL 才报 Invalid bound statement），
+ * 显式写死更稳。</p>
  */
 @SpringBootApplication(scanBasePackages = "org.example.cipherws.note")
+@MapperScan("org.example.cipherws.note.admin.mapper")
 public class NoteAdminServiceApplication {
 
     public static void main(String[] args) {

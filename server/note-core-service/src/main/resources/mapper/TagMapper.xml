@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  标签表映射。
+
+  列表 / 新建 / 改名三处共用同一段列清单（下面的 tagColumns），
+  免得三处 select 的字段悄悄跑偏。表名 `note_tag` 一律加反引号。
+-->
+<mapper namespace="org.example.cipherws.note.core.mapper.TagMapper">
+
+    <!--
+      noteCount 用关联子查询算：只数当前用户、未删除的笔记 ——
+      回收站里的笔记如果算进去，标签数量会虚高，用户点进去却看不到那么多。
+
+      这一列不属于任何实体字段，所以调用方一律拿 resultType="map"；
+      key 是原始列名：id / name / created_at / note_count。
+    -->
+    <sql id="tagColumns">
+        t.`id`, t.`name`, t.`created_at`,
+        (SELECT COUNT(*)
+         FROM `note_tag_rel` r
+                  JOIN `note` n ON n.`id` = r.`note_id`
+         WHERE r.`tag_id` = t.`id`
+           AND n.`user_id` = t.`user_id`
+           AND n.`deleted` = 0) AS `note_count`
+    </sql>
+
+    <select id="selectTagsByUser" resultType="map">
+        SELECT
+        <include refid="tagColumns"/>
+        FROM `note_tag` t
+        WHERE t.`user_id` = #{userId}
+        ORDER BY t.`created_at` ASC, t.`id` ASC
+    </select>
+
+    <select id="selectTagById" resultType="map">
+        SELECT
+        <include refid="tagColumns"/>
+        FROM `note_tag` t
+        WHERE t.`id` = #{tagId} AND t.`user_id` = #{userId}
+    </select>
+
+    <select id="selectTagByName" resultType="map">
+        SELECT
+        <include refid="tagColumns"/>
+        FROM `note_tag` t
+        WHERE t.`user_id` = #{userId} AND t.`name` = #{name}
+    </select>
+
+    <!-- 自增主键回填到实体；返回的 Map 里其实也用不到它，但保持与 insertNote 一致的写法 -->
+    <insert id="insertTag" parameterType="NoteTag" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `note_tag` (`user_id`, `name`)
+        VALUES (#{userId}, #{name})
+    </insert>
+
+    <update id="updateTagName">
+        UPDATE `note_tag` SET `name` = #{name} WHERE `id` = #{tagId} AND `user_id` = #{userId}
+    </update>
+
+    <!-- 关联行由 note_tag_rel 的外键 ON DELETE CASCADE 自动清掉，绝不反向删笔记 -->
+    <delete id="deleteTag">
+        DELETE FROM `note_tag` WHERE `id` = #{tagId} AND `user_id` = #{userId}
+    </delete>
+
+    <select id="countOwnedTag" resultType="long">
+        SELECT COUNT(*) FROM `note_tag` WHERE `id` = #{tagId} AND `user_id` = #{userId}
+    </select>
+
+</mapper>

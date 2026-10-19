@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  操作日志与统计映射。
+
+  为什么管理员日志和用户日志各写一套（而不是一条 SQL 里 choose 表名）：
+  表名进 SQL 只能靠 ${}，而 ${} 是注入面；这里四条语句的表名全是常量，
+  用户输入（关键词 / 日期）只走 #{}。两套 SQL 看着重复，但没有一处拼接。
+
+  actor_name 的兜底词（'管理员' / '用户'）在 SELECT 与 WHERE 里必须一致，
+  否则「孤儿日志」列表里显示的是兜底词，却搜不到这个词。
+  搜索条件里的兜底词走 #{actorFallback} 参数（与改造前 JdbcTemplate 的参数列表一致）。
+-->
+<mapper namespace="org.example.cipherws.note.admin.mapper.AdminLogMapper">
+
+    <!-- ================================================================ 管理员操作日志 -->
+
+    <sql id="adminLogSelect">
+        SELECT l.`id`, l.`type`, l.`detail`, l.`ip`, l.`created_at`,
+               COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '管理员') AS `actor_name`
+        FROM `note_admin_operation_log` l LEFT JOIN `note_user` u ON u.`id` = l.`admin_id`
+    </sql>
+
+    <!--
+      日期范围语义与改造前一致：from 用 >=（含当天 0 点），
+      to 用「次日 0 点之前」——比 <= 23:59:59 更稳，created_at 带毫秒也不会漏掉最后一条。
+    -->
+    <sql id="adminLogWhere">
+        <if test="likePattern != null">
+            AND (l.`type` LIKE #{likePattern} OR l.`detail` LIKE #{likePattern}
+            OR COALESCE(NULLIF(u.`nickname`, ''), u.`username`, #{actorFallback}) LIKE #{likePattern})
+        </if>
+        <if test="fromTime != null">
+            AND l.`created_at` &gt;= #{fromTime}
+        </if>
+        <if test="toTime != null">
+            AND l.`created_at` &lt; #{toTime}
+        </if>
+    </sql>
+
+    <select id="countAdminLogs" resultType="long">
+        SELECT COUNT(*) FROM `note_admin_operation_log` l LEFT JOIN `note_user` u ON u.`id` = l.`admin_id`
+        <where>
+            <include refid="adminLogWhere"/>
+        </where>
+    </select>
+
+    <select id="listAdminLogs" resultType="map">
+        <include refid="adminLogSelect"/>
+        <where>
+            <include refid="adminLogWhere"/>
+        </where>
+        ORDER BY l.`created_at` DESC, l.`id` DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- ================================================================ 用户操作日志 -->
+
+    <sql id="userLogSelect">
+        SELECT l.`id`, l.`type`, l.`detail`, l.`ip`, l.`created_at`,
+               COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '用户') AS `actor_name`
+        FROM `note_user_operation_log` l LEFT JOIN `note_user` u ON u.`id` = l.`user_id`
+    </sql>
+
+    <sql id="userLogWhere">
+        <if test="likePattern != null">
+            AND (l.`type` LIKE #{likePattern} OR l.`detail` LIKE #{likePattern}
+            OR COALESCE(NULLIF(u.`nickname`, ''), u.`username`, #{actorFallback}) LIKE #{likePattern})
+        </if>
+        <if test="fromTime != null">
+            AND l.`created_at` &gt;= #{fromTime}
+        </if>
+        <if test="toTime != null">
+            AND l.`created_at` &lt; #{toTime}
+        </if>
+    </sql>
+
+    <select id="countUserLogs" resultType="long">
+        SELECT COUNT(*) FROM `note_user_operation_log` l LEFT JOIN `note_user` u ON u.`id` = l.`user_id`
+        <where>
+            <include refid="userLogWhere"/>
+        </where>
+    </select>
+
+    <select id="listUserLogs" resultType="map">
+        <include refid="userLogSelect"/>
+        <where>
+            <include refid="userLogWhere"/>
+        </where>
+        ORDER BY l.`created_at` DESC, l.`id` DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!--
+      审计日志只增不改不删（需求 4.7.4），所以这个文件里没有 update / delete。
+      detail 与 ip 的长度夹取在 Service 里做（列宽分别是 VARCHAR(255) / VARCHAR(64)）。
+    -->
+    <insert id="insertAdminLog">
+        INSERT INTO `note_admin_operation_log` (`admin_id`, `type`, `detail`, `ip`)
+        VALUES (#{adminId}, #{type}, #{detail}, #{ip})
+    </insert>
+
+    <!-- ================================================================ AI 调用统计 -->
+
+    <!-- 按天分组；Map 的 key 是 day / calls（下划线原样，mapUnderscoreToCamelCase 对 Map 无效） -->
+    <select id="countAiCallsByDay" resultType="map">
+        SELECT DATE(`created_at`) AS `day`, COUNT(*) AS `calls`
+        FROM `note_ai_summary_record`
+        WHERE `created_at` &gt;= #{fromTime}
+        GROUP BY DATE(`created_at`)
+    </select>
+
+    <!--
+      GROUP BY 带上昵称与账号，既满足 ONLY_FULL_GROUP_BY，也能直接取到展示名。
+      ORDER BY 用别名 calls：它就是 SELECT 里 COUNT(*) 的别名，不涉及用户输入。
+    -->
+    <select id="topUsers" resultType="map">
+        SELECT r.`user_id` AS `user_id`,
+               COALESCE(NULLIF(u.`nickname`, ''), u.`username`, '未知用户') AS `name`,
+               COUNT(*) AS `calls`
+        FROM `note_ai_summary_record` r LEFT JOIN `note_user` u ON u.`id` = r.`user_id`
+        GROUP BY r.`user_id`, u.`nickname`, u.`username`
+        ORDER BY `calls` DESC, r.`user_id` ASC
+        LIMIT 5
+    </select>
+
+    <!-- 四个总量都是一次性的，合成为一行，省三次往返 -->
+    <select id="totals" resultType="map">
+        SELECT (SELECT COUNT(*) FROM `note_user`) AS `users`,
+               (SELECT COUNT(*) FROM `note` WHERE `deleted` = 0) AS `notes`,
+               (SELECT COUNT(*) FROM `note_ai_summary_record`) AS `ai_calls`,
+               (SELECT COUNT(*) FROM `note` WHERE `flagged` = 1 AND `deleted` = 0) AS `flagged_notes`
+    </select>
+
+</mapper>
