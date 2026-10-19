@@ -10,6 +10,8 @@ import org.example.cipherws.note.user.mapper.UserMapper;
 import org.example.cipherws.note.user.service.AvatarService;
 import org.example.cipherws.note.user.service.MailService;
 import org.example.cipherws.note.user.service.UserService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -30,6 +32,8 @@ import java.util.regex.Pattern;
  */
 @Service
 public class UserServiceImpl implements UserService {
+
+    private static final Logger log = LoggerFactory.getLogger(UserServiceImpl.class);
 
     /**
      * 账号允许的字符：中文、英文字母、数字、下划线。
@@ -231,7 +235,16 @@ public class UserServiceImpl implements UserService {
         codes.put(mail, new CodeEntry(code, use, now + CODE_TTL_MILLIS));
         lastSentAt.put(mail, now);
 
-        mailService.sendCode(mail, code, use);
+        try {
+            mailService.sendCode(mail, code, use);
+        } catch (Exception e) {
+            // 发信失败要回滚「已发送」状态：否则验证码在内存里躺着、用户却没收到，
+            // 而且 60 秒频控还卡着不让重试，人会以为是服务坏了。
+            codes.remove(mail);
+            lastSentAt.remove(mail);
+            log.error("验证码邮件发送失败 to={} purpose={}", mail, use, e);
+            throw new BusinessException("验证码邮件发送失败，请检查邮箱配置或稍后重试");
+        }
 
         boolean devMode = !mailService.isEnabled();
         String hint = devMode
