@@ -1,12 +1,7 @@
 <template>
   <div class="icon-grid">
-    <LinkIcon title="毕业设计" bg-color="#fb7299" :size="66" />
+    <LinkIcon title="池禾笔记" bg-color="#fb7299" :size="66" img-url="/images/note_ico.png" to="https://note.cipherws.icu"/>
     <LinkIcon title="关于我" bg-color="#4e6ef2" :size="66" img-url="/tab-icon/icon.jpg" />
-    <!--
-      云间列车：独立子项目，部署在 train.cipherws.icu（nginx 直托 train/dist）。
-      img-url 指向 public/images/train.png，bg-color 取图标主体平均色 #bb7469，
-      这样图片加载出来之前不会闪一下默认的粉色。
-    -->
     <LinkIcon
       title="云间列车"
       bg-color="#bb7469"
