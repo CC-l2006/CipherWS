@@ -38,6 +38,19 @@ spring:
               uri: lb://cipherws-portal-service
               predicates:
                 - Path=/portal/**
+            # 笔记站：/api/** 与 /uploads/** 原样转给 note-gateway。
+            # 不加 StripPrefix —— note-gateway 自己就是按 /api/** 分流的，
+            # 它会剥掉 /api 再转发给 note-* 服务。
+            # 这样笔记本只需要穿透一个 8080 端口，笔记站也能走通，
+            # nginx 那边 /api/ 直接反代隧道即可（见 deploy/nginx/cipherws.conf）。
+            - id: note-gateway-api
+              uri: lb://note-gateway
+              predicates:
+                - Path=/api/**
+            - id: note-gateway-uploads
+              uri: lb://note-gateway
+              predicates:
+                - Path=/uploads/**
   config:
     import:
       - optional:nacos:cipherws-gateway.yaml

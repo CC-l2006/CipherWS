@@ -6,14 +6,21 @@
 #   sudo bash update-backend-address.sh frp-box.com:64456 --dry-run
 #
 # 后端跑在本地笔记本上，经 SakuraFrp 隧道暴露。隧道地址（域名+端口）在
-# nginx 配置里一共出现 5 处，漏改任意一处都会出问题（例如上游连上了，
+# nginx 配置里一共出现 9 处，漏改任意一处都会出问题（例如上游连上了，
 # 但 SNI/Host 还带着老域名），所以统一用这个脚本改，不手改。
 #
 #   1. upstream cipherws_backend 的 server 行
-#   2. location /say/   的 proxy_set_header Host
-#   3. location /say/   的 proxy_ssl_name
-#   4. location /audio/ 的 proxy_set_header Host
-#   5. location /audio/ 的 proxy_ssl_name
+#   2. location /say/    的 proxy_set_header Host
+#   3. location /say/    的 proxy_ssl_name
+#   4. location /audio/  的 proxy_set_header Host
+#   5. location /audio/  的 proxy_ssl_name
+#   6. location /api/    的 proxy_set_header Host      ← 笔记站接口
+#   7. location /api/    的 proxy_ssl_name
+#   8. location /uploads/ 的 proxy_set_header Host     ← 笔记站头像
+#   9. location /uploads/ 的 proxy_ssl_name
+#
+# 笔记站与主站共用同一条隧道（笔记本只穿透 8080 一个端口），
+# 所以这两组 location 也走 cipherws_backend，地址必须一起改。
 #
 # 脚本只动这种「孤立地址」行：
 #   server <地址>;          proxy_set_header Host <地址>;

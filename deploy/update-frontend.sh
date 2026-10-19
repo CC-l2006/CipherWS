@@ -44,7 +44,6 @@ REPO_DIR="${REPO_DIR:-$(dirname -- "$SCRIPT_DIR")}"
 BRANCH="${BRANCH:-main}"
 MAIN_SERVICE="${MAIN_SERVICE:-auto}"   # auto = 自动探测 cipherws-web* 单元
 MAIN_PORT="${MAIN_PORT:-8000}"
-NOTE_PORT="${NOTE_PORT:-8002}"         # 笔记站前端（node server.js --app note）
 NGINX_CONF="${NGINX_CONF:-/etc/nginx/conf.d/cipherws.conf}"
 NGINX_SRC_REL="deploy/nginx/cipherws.conf"
 ENV_DOC_REL="docs/2026-10-10/前端双站点结构.md"
@@ -80,7 +79,6 @@ CipherWS 前端一键更新
                                    （历史上叫 cipherws-web，文档里建议叫 cipherws-web-main，
                                      两种都能认出来；要写死就显式赋值）
   NGINX_CONF=/etc/nginx/conf.d/cipherws.conf   nginx 站点配置路径
-  NOTE_PORT=8002               笔记站前端端口（node server.js --app note）
 
 示例：
   ./deploy/update-frontend.sh                 更新全部三个站点
@@ -91,8 +89,7 @@ CipherWS 前端一键更新
 站点说明：
   main   主站        node 进程 8000（systemd），nginx 反代
   train  云间列车    nginx 直接托管 dist，无进程
-  note   池禾笔记    node 进程 8002（server.js --app note）；它每次请求都读磁盘，
-                     所以重建后**不需要重启**，产物一落盘就生效
+  note   池禾笔记    nginx 直接托管 dist，**无进程**；接口走主站那条隧道（/api/**）
 
 完整说明见 docs/2026-10-10/前端双站点结构.md
 EOF
@@ -377,8 +374,8 @@ done
 if [[ "$DO_RESTART" -eq 0 ]]; then
   info "已指定 --no-restart，跳过重启服务"
 elif ! site_wanted main; then
-  # train 由 nginx 直接托管 dist；note 的 server.js 每次请求都读磁盘，
-  # 新产物落盘即生效 —— 这两者都不需要重启任何进程。
+  # train 与 note 都由 nginx 直接托管 dist，新产物落盘即生效，
+  # 都不需要重启任何进程。
   info "本次没有更新 main：train 与 note 都不需要重启进程"
 else
   step "重启主站服务"
@@ -479,12 +476,13 @@ if [[ "$DO_VERIFY" -eq 1 ]]; then
     fi
 
     if site_wanted note; then
-      if curl -fsS --max-time 5 "http://127.0.0.1:${NOTE_PORT}/" >/dev/null 2>&1; then
-        ok "笔记站 http://127.0.0.1:${NOTE_PORT}/ 响应正常"
+      # note 前端由 nginx 直接托管 frontend/note/dist，没有 node 进程了，
+      # 所以不再探 8002，改为确认产物存在 + 提醒 nginx 需要加载新配置。
+      if [[ -f "$REPO_DIR/frontend/note/dist/index.html" ]]; then
+        ok "笔记站由 nginx 托管 dist（不需要任何前端进程）"
+        info "若 nginx 还没加载新配置：sudo nginx -t && sudo systemctl reload nginx"
       else
-        warn "笔记站 http://127.0.0.1:${NOTE_PORT}/ 无响应 —— 产物已构建，但没有进程在服务它"
-        warn "启动：cd $REPO_DIR/frontend && node server.js --app note"
-        warn "常驻建议配 systemd（单元示例见 docs/2026-10-19/笔记站上线步骤.md）"
+        warn "笔记站 dist 缺失：frontend/note/dist/index.html 不存在"
       fi
     fi
 
@@ -505,7 +503,7 @@ if [[ "$DO_VERIFY" -eq 1 ]]; then
           warn "  502 = 上游没起；404 = server_name 或 root 没配对；"
           warn "  000 = nginx 没在跑或没监听 80"
           if [[ "$host" == note.* ]]; then
-            warn "  note 的 502 通常是 8002 上没有进程：cd frontend && node server.js --app note"
+            warn "  note 的 502 多半是 /api/ 没走通隧道，或 dist 目录不对（见「笔记站上线步骤」）"
           fi
         fi
       done
@@ -531,5 +529,5 @@ cat <<'EOF'
 此时静态页面仍然正常，只是「每日一句」与音乐播放器取不到数据，属于预期情况。
 
 如果 note 的接口 502，说明笔记本上的 note-gateway(8083) 没起或隧道没映射到它；
-页面本身能打开（静态资源由 nginx 与 8002 提供），只是登录不了。
+页面本身能打开（dist 由 nginx 托管），只是登录不了。
 EOF
