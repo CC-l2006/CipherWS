@@ -89,6 +89,15 @@ management:
   endpoint:
     health:
       show-details: always
+  health:
+    mail:
+      # 关掉邮件健康检查。
+      # 配了 SPRING_MAIL_HOST 之后 Spring 会自动注册 MailHealthIndicator，
+      # 它每次心跳都**新建一条 SMTP 连接**去测活 —— 实测单次耗时 11.9 秒。
+      # 后果：/actuator/health 被拖到十几秒，nginx / k8s 的探活直接超时，
+      # 服务明明正常却显示不健康。
+      # 而且「邮件暂时发不出去」不该把整个服务判成 DOWN：用户照样能读写笔记。
+      enabled: false
 
 logging:
   level:
