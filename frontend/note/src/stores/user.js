@@ -1,63 +1,70 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-
-const TOKEN_KEY = 'note_token'
+import { authApi, userApi } from '@/api/index.js'
+import { getToken, TOKEN_KEY } from '@/api/request.js'
 
 /**
- * 用户状态（占位实现）
- * 目前使用本地 mock 数据，接入真实后端时把 requestLogin / requestUserInfo
- * 换成你的 axios 请求即可，其余逻辑不用改。
+ * 用户状态。
+ *
+ * 上一版这里是写死的 mock（mock-token-xxx + 固定 roles），现在接到 api/index.js，
+ * 真实后端就绪后**本文件一行都不用改** —— 只要后端按 api/index.js 里的契约实现。
  */
 export const useUserStore = defineStore('user', () => {
-  const token = ref(localStorage.getItem(TOKEN_KEY) || '')
+  const token = ref(getToken())
   const userInfo = ref(null)
 
   const isLogin = computed(() => !!token.value)
-  const roles = computed(() => userInfo.value?.roles || [])
+  const isAdmin = computed(() => userInfo.value?.role === 'admin')
+  const aiQuota = computed(() => userInfo.value?.aiQuota ?? 0)
+  const displayName = computed(
+    () => userInfo.value?.nickname || userInfo.value?.username || '未登录'
+  )
 
   function setToken(value) {
     token.value = value || ''
-    if (value) {
-      localStorage.setItem(TOKEN_KEY, value)
-    } else {
-      localStorage.removeItem(TOKEN_KEY)
+    try {
+      if (value) localStorage.setItem(TOKEN_KEY, value)
+      else localStorage.removeItem(TOKEN_KEY)
+    } catch {
+      /* 隐私模式忽略 */
     }
   }
 
   function setUserInfo(info) {
-    userInfo.value = info
+    userInfo.value = info || null
   }
 
-  // 登录：接入后端后替换为真实接口调用
   async function login({ username, password }) {
-    if (!username || !password) {
-      throw new Error('请输入用户名和密码')
-    }
-    // TODO: 替换为真实登录接口
-    const mockToken = `mock-token-${username}`
-    setToken(mockToken)
-    setUserInfo({ username, nickname: username, roles: ['admin'] })
-    return userInfo.value
+    const { data } = await authApi.login({ username, password })
+    setToken(data.token)
+    setUserInfo(data.user)
+    return data.user
   }
 
-  // 获取用户信息：接入后端后替换为真实接口调用
-  async function getUserInfo() {
-    if (!token.value) {
-      throw new Error('未登录')
-    }
-    // TODO: 替换为真实用户信息接口
-    if (!userInfo.value) {
-      userInfo.value = {
-        username: 'admin',
-        nickname: '管理员',
-        roles: ['admin']
-      }
-    }
-    return userInfo.value
+  async function register({ username, password, email }) {
+    const { data } = await authApi.register({ username, password, email })
+    return data
+  }
+
+  /** 路由守卫里调用：刷新页面后凭 token 恢复登录态 */
+  async function fetchUserInfo() {
+    const { data } = await userApi.profile()
+    setUserInfo(data)
+    return data
+  }
+
+  /** 局部更新（改资料、AI 额度扣减后同步） */
+  function patchUserInfo(patch) {
+    if (!userInfo.value) return
+    userInfo.value = { ...userInfo.value, ...patch }
   }
 
   async function logout() {
-    // TODO: 接入后端后调用退出登录接口
+    try {
+      if (token.value) await authApi.logout()
+    } catch {
+      /* 退出失败也要清本地状态 */
+    }
     setToken('')
     setUserInfo(null)
   }
@@ -66,11 +73,15 @@ export const useUserStore = defineStore('user', () => {
     token,
     userInfo,
     isLogin,
-    roles,
+    isAdmin,
+    aiQuota,
+    displayName,
     setToken,
     setUserInfo,
+    patchUserInfo,
     login,
-    getUserInfo,
+    register,
+    fetchUserInfo,
     logout
   }
 })

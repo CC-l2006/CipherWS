@@ -1,0 +1,338 @@
+/* =============================================================================
+   CipherWS 笔记 —— 设计令牌与基础样式
+
+   设计主题：「纸与墨」。
+   需求文档只规定「基础主色调以米白色为主」，所以米白是底色（--paper）。
+   但「米白 + 高对比衬线 + 陶土色点缀」是最容易做成模板的组合，这里刻意换成
+   **墨蓝（--accent）** 作为主行动色 —— 它读起来像钢笔水写在纸上，
+   和「笔记」这个主题直接相关，而不是随便挑的一个暖色。
+
+   另一个刻意的取舍：**不用卡片阴影堆层次，用发丝线（--rule）**。
+   纸上的分隔是靠横线的，不是靠浮起来的白盒子。所以全站只有编辑区那一张
+   「纸」（--sheet）带阴影，其余都是线与留白。
+
+   唯一的重装饰留给编辑区：左侧一道竖边线，像稿纸的页边线；
+   AI 摘要以「页边批注」出现在右侧留白（见 views/notes/NoteEditor.vue）。
+   ============================================================================= */
+
+:root {
+  /* ---------- 纸 ---------- */
+  --paper: #f6f2e9;        /* 主底色：米白（需求文档指定） */
+  --paper-deep: #efe9db;   /* 次级面：侧栏、表头 */
+  --paper-sink: #e9e2d2;   /* 按下/选中底 */
+  --sheet: #fffcf6;        /* 「一张纸」：编辑区、弹窗内容 */
+
+  /* ---------- 线 ---------- */
+  --rule: #e3daca;         /* 发丝线，代替阴影表达分隔 */
+  --rule-strong: #d0c4ae;  /* 需要更明确时（输入框、表格底线） */
+
+  /* ---------- 墨 ---------- */
+  --ink: #221f1b;          /* 正文 */
+  --ink-2: #4a443b;        /* 次级正文 */
+  --ink-3: #857b6d;        /* 说明文字、占位符 */
+  --ink-inverse: #fbf8f1;  /* 墨底上的字 */
+
+  /* ---------- 墨蓝：主行动色 ---------- */
+  --accent: #2d4a72;
+  --accent-hover: #3a5c8a;
+  --accent-press: #243b5c;
+  --accent-soft: #e6ecf4;  /* 选中行、标签底 */
+  --accent-ink: #223a5b;   /* 浅底上的强调文字 */
+
+  /* ---------- 语义色（只在对应语义上用，不做装饰） ---------- */
+  --danger: #a6432f;
+  --danger-hover: #bd4f39;
+  --danger-soft: #f7e8e4;
+  --warn: #8a6413;
+  --warn-soft: #f6eedb;
+  --ok: #3c6b4a;
+  --ok-soft: #e6eee7;
+
+  /* ---------- 字体 ---------- */
+  /* 标题与笔记正文用宋体：笔记产品读的是「文章」，不是「界面」 */
+  --font-serif: "Songti SC", "STSong", "Noto Serif CJK SC", "Source Han Serif SC",
+    "SimSun", "Georgia", serif;
+  /* 界面控件用黑体：小字号下笔画更清楚 */
+  --font-sans: "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", "Noto Sans CJK SC",
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* 等宽只用于 ID、时间戳这类真正的机器数据，不拿来做装饰 */
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+
+  /* ---------- 字号 ---------- */
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 18px;
+  --fs-xl: 22px;
+  --fs-2xl: 28px;
+  --fs-3xl: 36px;
+
+  /* ---------- 圆角：小，接近纸与线的质感 ---------- */
+  --r-sm: 3px;
+  --r-md: 5px;
+  --r-lg: 8px;
+  --r-pill: 999px;
+
+  /* ---------- 间距（4 的倍数） ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+
+  /* ---------- 层次 ---------- */
+  /* 全站只有编辑区那张纸带阴影 */
+  --shadow-sheet: 0 1px 0 var(--rule), 0 14px 30px -20px rgba(34, 31, 27, 0.4);
+  --shadow-pop: 0 2px 0 var(--rule), 0 18px 40px -20px rgba(34, 31, 27, 0.45);
+
+  /* ---------- 布局 ---------- */
+  --rail-w: 232px;
+  --list-w: 320px;
+  --topbar-h: 56px;
+}
+
+/* ============================= reset ============================= */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+}
+
+p {
+  margin: 0;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+ul,
+ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 键盘可达性是质量底线，不是可选项 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+/* 细滚动条，避免默认样式在米白底上很扎眼 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--rule-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--rule-strong);
+  border: 3px solid transparent;
+  border-radius: var(--r-pill);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* 尊重「减少动态效果」偏好 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================= 共用工具类 ============================= */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+
+.muted {
+  color: var(--ink-3);
+}
+
+.small {
+  font-size: var(--fs-sm);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+/* 正文阅读区：限制行长，宋体给更松的行高（skill 的排版建议） */
+.prose {
+  font-family: var(--font-serif);
+  font-size: var(--fs-md);
+  line-height: 1.9;
+  color: var(--ink);
+  max-width: 68ch;
+}
+
+.prose p + p {
+  margin-top: 1em;
+}
+
+/* 页标题：宋体 + 细的上下发丝线，像书页的栏头 */
+.page-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--rule);
+}
+
+.page-title h1 {
+  font-size: var(--fs-xl);
+}
+
+.page-sub {
+  color: var(--ink-3);
+  font-size: var(--fs-sm);
+}
+
+/* 「一张纸」：全站唯一带阴影的容器 */
+.sheet {
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-sheet);
+}
+
+/* 屏读隐藏，但屏幕阅读器可读 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 加载态：一根沿底线走的墨线，不用旋转的圈 */
+@keyframes ink-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.loading-rule {
+  position: relative;
+  height: 2px;
+  overflow: hidden;
+  background: var(--rule);
+}
+
+.loading-rule::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  animation: ink-sweep 1.1s ease-in-out infinite;
+}
+
+/* 打印：把界面 chrome 去掉，只留纸 */
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+}

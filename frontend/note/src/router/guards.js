@@ -1,49 +1,66 @@
-import router from './index'
-import { useUserStore } from '@/stores/user' // Pinia store
+import router from './index.js'
+import { useUserStore } from '@/stores/user.js'
+import { useToastStore } from '@/stores/toast.js'
 
-const WHITE_LIST = ['/login', '/404']
+const APP_NAME = 'CipherWS 笔记'
 
-// 全局前置守卫
-router.beforeEach(async (to, from, next) => {
-  // 设置页面标题
-  document.title = to.meta.title ? `${to.meta.title} - My App` : 'My App'
+// 未登录也能访问的页面
+const WHITE_LIST = ['/login', '/register', '/forgot-password']
+
+router.beforeEach(async (to) => {
+  document.title = to.meta.title ? `${to.meta.title} · ${APP_NAME}` : APP_NAME
 
   const userStore = useUserStore()
+  const toast = useToastStore()
 
-  // 白名单直接放行
-  if (WHITE_LIST.includes(to.path)) {
-    return next()
+  // 已登录还去登录页 → 直接回首页，避免重复登录
+  if (to.meta.guestOnly && userStore.isLogin) {
+    return { path: '/' }
   }
 
-  // 未登录
-  if (!userStore.token) {
-    return next({
-      path: '/login',
-      query: { redirect: to.fullPath }
-    })
+  if (WHITE_LIST.includes(to.path) || to.meta.guestOnly) {
+    return true
   }
 
-  // 已登录但未获取用户信息
+  if (!userStore.isLogin) {
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+
+  // 已登录但刷新页面后还没有用户信息 → 补拉一次
   if (!userStore.userInfo) {
     try {
-      await userStore.getUserInfo()
-      return next({ ...to, replace: true })
-    } catch (err) {
+      await userStore.fetchUserInfo()
+    } catch {
       await userStore.logout()
-      return next('/login')
+      toast.warn('登录已失效，请重新登录')
+      return { path: '/login', query: { redirect: to.fullPath } }
     }
   }
 
-  next()
+  // 角色校验（需求 4.1.4：普通用户无后台入口）
+  const roles = to.meta.roles
+  if (Array.isArray(roles) && roles.length) {
+    const mine = userStore.userInfo?.role
+    if (!roles.includes(mine)) {
+      toast.error('该页面仅管理员可访问')
+      return { path: '/' }
+    }
+  }
+
+  return true
 })
 
-// 全局后置钩子
 router.afterEach((to) => {
-  // 关闭 loading、埋点等
-  console.log('路由跳转完成:', to.path)
+  // 页面切换后把焦点交给主区域，键盘与读屏用户不用重新 Tab 一遍导航
+  requestAnimationFrame(() => {
+    const main = document.getElementById('main-content')
+    if (main) {
+      main.setAttribute('tabindex', '-1')
+      main.focus({ preventScroll: true })
+    }
+  })
 })
 
-// 路由错误处理
 router.onError((error) => {
-  console.error('路由错误:', error)
+  console.error('[router]', error)
 })

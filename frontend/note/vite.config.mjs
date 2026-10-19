@@ -11,6 +11,15 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
-    port: 8002
+    // 端口分配约定：main=8000 / train=8001 / note=8002
+    port: 8002,
+    // 只有 VITE_API_MODE=http 时才真正发请求；mock 模式不会走到这里。
+    // note-gateway 默认 8083（避开 cipherws 的 8080/8081/8082 与 Nacos 的 8848/8849）。
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8083',
+        changeOrigin: true
+      }
+    }
   }
 })
