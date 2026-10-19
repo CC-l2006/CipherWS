@@ -137,3 +137,6 @@ deploy/*backup*.txt
 # 需要长期分发时改用 Docker Registry 或对象存储，不要提交进 Git（GitHub 单文件上限 100 MB）。
 docker/*.tar
 deploy/**/*.tar
+
+# 用户上传的头像等运行时文件（相对进程工作目录，可能在仓库根）
+uploads/
