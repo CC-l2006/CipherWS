@@ -80,18 +80,31 @@ if (-not (Test-Path $psExe)) { $psExe = 'powershell.exe' }
 # this process only (no system setting is modified).
 try { Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force } catch { }
 
-# The three services, in start order (say -> portal -> gateway).
+# All backend services, in start order.
 # Ports must match each module's application.yml default.
+#   main site : cipherws-gateway(8080) -> say(8081) / portal(8082)
+#   note site : note-gateway(8083)     -> user(8084) / core(8085) / ai(8086) / admin(8087)
 $services = @(
-    @{ Name = 'cipherws-say-service';    Port = 8081; Jar = 'cipherws-say-service\target\cipherws-say-service-0.0.1-SNAPSHOT.jar' },
-    @{ Name = 'cipherws-portal-service'; Port = 8082; Jar = 'cipherws-portal-service\target\cipherws-portal-service-0.0.1-SNAPSHOT.jar' },
-    @{ Name = 'cipherws-gateway';        Port = 8080; Jar = 'cipherws-gateway\target\cipherws-gateway-0.0.1-SNAPSHOT.jar' }
+    @{ Name = 'cipherws-say-service';    Port = 8081; Order = 1; Group = 'main'; Jar = 'cipherws-say-service\target\cipherws-say-service-0.0.1-SNAPSHOT.jar' },
+    @{ Name = 'cipherws-portal-service'; Port = 8082; Order = 2; Group = 'main'; Jar = 'cipherws-portal-service\target\cipherws-portal-service-0.0.1-SNAPSHOT.jar' },
+    @{ Name = 'cipherws-gateway';        Port = 8080; Order = 3; Group = 'main'; Jar = 'cipherws-gateway\target\cipherws-gateway-0.0.1-SNAPSHOT.jar' },
+
+    @{ Name = 'note-user-service';       Port = 8084; Order = 4; Group = 'note'; Jar = 'note-user-service\target\note-user-service-0.0.1-SNAPSHOT.jar' },
+    @{ Name = 'note-core-service';       Port = 8085; Order = 5; Group = 'note'; Jar = 'note-core-service\target\note-core-service-0.0.1-SNAPSHOT.jar' },
+    @{ Name = 'note-ai-service';         Port = 8086; Order = 6; Group = 'note'; Jar = 'note-ai-service\target\note-ai-service-0.0.1-SNAPSHOT.jar' },
+    @{ Name = 'note-admin-service';      Port = 8087; Order = 7; Group = 'note'; Jar = 'note-admin-service\target\note-admin-service-0.0.1-SNAPSHOT.jar' },
+    @{ Name = 'note-gateway';            Port = 8083; Order = 8; Group = 'note'; Jar = 'note-gateway\target\note-gateway-0.0.1-SNAPSHOT.jar' }
 )
 
 # endpoints used for the final verification
 $apiUrl     = 'http://127.0.0.1:8080/say/saying?id=1'
 $portalUrl  = 'http://127.0.0.1:8080/portal/say/2'
 $consoleUrl = 'http://127.0.0.1:8849/'
+# note site: /actuator/health needs no token; /api/notes MUST answer 401
+# (the gateway rejects unauthenticated calls -- a 200 there would mean the
+# JWT filter is not wired, and a 503 means the gateway cannot reach upstreams)
+$noteHealthUrl = 'http://127.0.0.1:8083/actuator/health'
+$noteGuardUrl  = 'http://127.0.0.1:8083/api/notes'
 
 # --------------------------------------------------------------- helpers ----
 function Test-Port([int]$Port) {
@@ -168,11 +181,21 @@ function Start-NacosIfNeeded {
 function Start-Backend {
     $running = Get-RunningServices
     if ($running.Count -eq $services.Count) {
-        Write-Host '[2/3] All three services already listening -- nothing to start' -ForegroundColor Yellow
+        Write-Host '[2/3] All backend services already listening -- nothing to start' -ForegroundColor Yellow
         return
     }
 
-    Write-Host '[2/3] Starting the three backend services ...' -ForegroundColor Cyan
+    # The note services read DB_PASSWORD / NOTE_JWT_SECRET / SMTP credentials
+    # from deploy\note.env.local (gitignored). Warn early: without it they will
+    # boot but every DB call fails with "Access denied".
+    $noteEnvPath = Join-Path $deployDir 'note.env.local'
+    if (-not (Test-Path $noteEnvPath)) {
+        Write-Host '[2/3] WARNING: deploy\note.env.local not found' -ForegroundColor Yellow
+        Write-Host '      note-* services need DB_PASSWORD and NOTE_JWT_SECRET;' -ForegroundColor Yellow
+        Write-Host '      copy deploy\note.env.example to deploy\note.env.local and fill it in.' -ForegroundColor Yellow
+    }
+
+    Write-Host '[2/3] Starting the backend services ...' -ForegroundColor Cyan
     Invoke-DeployScript 'run-services.ps1' @{ Action = 'start' }
 
     $allUp = $true
@@ -192,6 +215,8 @@ function Test-Endpoints {
     $checks = @(
         @{ Label = 'GET /say/saying?id=1   (gateway -> say)';    Url = $apiUrl;     Want = 200 },
         @{ Label = 'GET /portal/say/2      (gateway -> portal)'; Url = $portalUrl;  Want = 200 },
+        @{ Label = 'note gateway health';                        Url = $noteHealthUrl; Want = 200 },
+        @{ Label = 'GET /api/notes (expect 401 = auth works)';   Url = $noteGuardUrl;  Want = 401 },
         @{ Label = 'Nacos console web UI';                        Url = $consoleUrl; Want = 302 }
     )
     $failed = 0
@@ -210,21 +235,24 @@ function Test-Endpoints {
         Write-Host 'Re-check with:  -Action status' -ForegroundColor Yellow
     }
     Write-Host ''
-    Write-Host '  API base   : http://127.0.0.1:8080' -ForegroundColor White
+    Write-Host '  API base   : http://127.0.0.1:8080  (main site)' -ForegroundColor White
+    Write-Host '  API base   : http://127.0.0.1:8083  (note site, /api/**)' -ForegroundColor White
     Write-Host "  Nacos UI   : $consoleUrl  (auth disabled locally)" -ForegroundColor White
     Write-Host "  Logs       : $logDir" -ForegroundColor White
+    Write-Host ''
+    Write-Host '  Note front : cd frontend && node server.js --app note   (port 8002)' -ForegroundColor DarkGray
     Write-Host ''
     Write-Host '  Stop with  : powershell -NoProfile -ExecutionPolicy Bypass -File .\<this script> -Action stop' -ForegroundColor DarkGray
 }
 
 function Stop-Backend {
-    Write-Host '[1/2] Stopping the three backend services ...' -ForegroundColor Cyan
+    Write-Host '[1/2] Stopping the backend services ...' -ForegroundColor Cyan
     Invoke-DeployScript 'run-services.ps1' @{ Action = 'stop' }
     Write-Host '[2/2] Stopping Nacos ...' -ForegroundColor Cyan
     Invoke-DeployScript 'stop-nacos.ps1' @{}
     Write-Host ''
     $left = @()
-    foreach ($p in 8080, 8081, 8082, 8848, 8849, 9848) { if (Test-Port $p) { $left += $p } }
+    foreach ($p in 8080, 8081, 8082, 8083, 8084, 8085, 8086, 8087, 8848, 8849, 9848) { if (Test-Port $p) { $left += $p } }
     if ($left.Count) {
         Write-Host ("Still listening: {0}" -f ($left -join ', ')) -ForegroundColor Yellow
     } else {

@@ -44,6 +44,7 @@ REPO_DIR="${REPO_DIR:-$(dirname -- "$SCRIPT_DIR")}"
 BRANCH="${BRANCH:-main}"
 MAIN_SERVICE="${MAIN_SERVICE:-auto}"   # auto = 自动探测 cipherws-web* 单元
 MAIN_PORT="${MAIN_PORT:-8000}"
+NOTE_PORT="${NOTE_PORT:-8002}"         # 笔记站前端（node server.js --app note）
 NGINX_CONF="${NGINX_CONF:-/etc/nginx/conf.d/cipherws.conf}"
 NGINX_SRC_REL="deploy/nginx/cipherws.conf"
 ENV_DOC_REL="docs/2026-10-10/前端双站点结构.md"
@@ -65,7 +66,7 @@ CipherWS 前端一键更新
   ./deploy/update-frontend.sh [选项]
 
 选项：
-  --site all|main|train   要更新的站点，默认 all
+  --site all|main|train|note   要更新的站点，默认 all
   --skip-pull             不拉代码，只重新构建（改了 .env.production 后用这个）
   --ci                    依赖有变动时用 npm ci 而非 npm install
   --no-restart            只构建，不重启服务、不同步 nginx 配置
@@ -79,11 +80,19 @@ CipherWS 前端一键更新
                                    （历史上叫 cipherws-web，文档里建议叫 cipherws-web-main，
                                      两种都能认出来；要写死就显式赋值）
   NGINX_CONF=/etc/nginx/conf.d/cipherws.conf   nginx 站点配置路径
+  NOTE_PORT=8002               笔记站前端端口（node server.js --app note）
 
 示例：
-  ./deploy/update-frontend.sh                 更新两个站点
+  ./deploy/update-frontend.sh                 更新全部三个站点
   ./deploy/update-frontend.sh --site train    只更新云间列车（不需要重启服务）
+  ./deploy/update-frontend.sh --site note     只更新池禾笔记
   ./deploy/update-frontend.sh --skip-pull     改完 .env.production 后重新构建
+
+站点说明：
+  main   主站        node 进程 8000（systemd），nginx 反代
+  train  云间列车    nginx 直接托管 dist，无进程
+  note   池禾笔记    node 进程 8002（server.js --app note）；它每次请求都读磁盘，
+                     所以重建后**不需要重启**，产物一落盘就生效
 
 完整说明见 docs/2026-10-10/前端双站点结构.md
 EOF
@@ -92,7 +101,7 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --site)        [[ $# -ge 2 ]] || { printf -- '--site 后面要跟 all/main/train\n' >&2; exit 2; }
+    --site)        [[ $# -ge 2 ]] || { printf -- '--site 后面要跟 all/main/train/note\n' >&2; exit 2; }
                    SITE="$2"; shift 2 ;;
     --site=*)      SITE="${1#*=}"; shift ;;
     --skip-pull)   SKIP_PULL=1; shift ;;
@@ -105,8 +114,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$SITE" in
-  all|main|train) ;;
-  *) printf -- '--site 只能是 all / main / train，收到：%s\n' "$SITE" >&2; exit 2 ;;
+  all|main|train|note) ;;
+  *) printf -- '--site 只能是 all / main / train / note，收到：%s\n' "$SITE" >&2; exit 2 ;;
 esac
 
 # -----------------------------------------------------------------------------
@@ -232,11 +241,11 @@ ensure_env_production() {
 
   if [[ ! -f "$prod" ]]; then
     cat > "$prod" <<EOF
-# 线上构建：留空 = 同源相对路径，由 nginx 把 /say/ 与 /audio/ 反代到后端
+# 线上构建：留空 = 同源相对路径，由 nginx 把接口路径反代到后端
 # 配置见 $NGINX_SRC_REL，说明见 $ENV_DOC_REL
 #
 # 「=」必须保留。整行删掉的话 import.meta.env.VITE_API_BASE_URL 会变成 undefined，
-# 请求地址会被拼成 "undefined/say/saying"。
+# 请求地址会被拼成 "undefined/..." 而全部失败。
 VITE_API_BASE_URL=
 EOF
     ok "已创建 $prod（同源模式）"
@@ -288,6 +297,10 @@ step "检查环境变量文件"
 if site_wanted main; then
   ensure_env_production "$REPO_DIR/frontend/main"
 fi
+if site_wanted note; then
+  # note 也访问后端（/api/** 由 nginx 反代到 note-gateway），同样必须是同源模式
+  ensure_env_production "$REPO_DIR/frontend/note"
+fi
 if site_wanted train; then
   info "frontend/train 不访问后端接口，无需 .env 文件"
 fi
@@ -307,7 +320,7 @@ deps_changed() {
 
 step "依赖检查"
 
-for sub in main train; do
+for sub in main train note; do
   site_wanted "$sub" || continue
 
   if [[ ! -d "$REPO_DIR/frontend/$sub/node_modules" ]]; then
@@ -334,7 +347,7 @@ done
 # -----------------------------------------------------------------------------
 step "构建"
 
-for sub in main train; do
+for sub in main train note; do
   site_wanted "$sub" || continue
   info "构建 $sub ..."
   ( cd "$REPO_DIR/frontend" && npm run "build:$sub" ) || die "$sub 构建失败"
@@ -345,24 +358,28 @@ done
 
 # 产物自检：接口地址是构建时内联的，配置错了产物里会留下痕迹。
 # 这里直接查产物而不是只查 .env，因为无论问题出在哪个环节都能兜住。
-if site_wanted main && [[ -d "$REPO_DIR/frontend/main/dist/assets" ]]; then
-  if grep -rq 'your-backend-host' "$REPO_DIR/frontend/main/dist/assets" 2>/dev/null; then
-    warn "产物里出现了 .env.example 的占位地址 your-backend-host！"
+for sub in main note; do
+  site_wanted "$sub" || continue
+  [[ -d "$REPO_DIR/frontend/$sub/dist/assets" ]] || continue
+  if grep -rq 'your-backend-host' "$REPO_DIR/frontend/$sub/dist/assets" 2>/dev/null; then
+    warn "$sub 产物里出现了 .env.example 的占位地址 your-backend-host！"
     warn "这个值的端口是字母 port，浏览器会抛 Failed to parse URL，所有接口都会失败，"
-    warn "但页面看起来正常 —— 很难排查。请把 frontend/main/.env.production 改成"
+    warn "但页面看起来正常 —— 很难排查。请把 frontend/$sub/.env.production 改成"
     warn "VITE_API_BASE_URL=（留空）后重跑本脚本。"
   else
-    ok "产物自检：没有占位地址残留"
+    ok "$sub 产物自检：没有占位地址残留"
   fi
-fi
+done
 
 # -----------------------------------------------------------------------------
 # 5. 重启主站服务
 # -----------------------------------------------------------------------------
-if ! site_wanted main; then
-  info "云间列车由 nginx 直接托管 dist，无需重启任何服务"
-elif [[ "$DO_RESTART" -eq 0 ]]; then
-  info "已指定 --no-restart，跳过重启主站服务"
+if [[ "$DO_RESTART" -eq 0 ]]; then
+  info "已指定 --no-restart，跳过重启服务"
+elif ! site_wanted main; then
+  # train 由 nginx 直接托管 dist；note 的 server.js 每次请求都读磁盘，
+  # 新产物落盘即生效 —— 这两者都不需要重启任何进程。
+  info "本次没有更新 main：train 与 note 都不需要重启进程"
 else
   step "重启主站服务"
 
@@ -443,7 +460,7 @@ fi
 if [[ "$DO_VERIFY" -eq 1 ]]; then
   step "自检"
 
-  for sub in main train; do
+  for sub in main train note; do
     site_wanted "$sub" || continue
     html="$REPO_DIR/frontend/$sub/dist/index.html"
     ok "产物存在：frontend/$sub/dist/index.html（$(du -h "$html" | cut -f1)）"
@@ -461,16 +478,35 @@ if [[ "$DO_VERIFY" -eq 1 ]]; then
       fi
     fi
 
+    if site_wanted note; then
+      if curl -fsS --max-time 5 "http://127.0.0.1:${NOTE_PORT}/" >/dev/null 2>&1; then
+        ok "笔记站 http://127.0.0.1:${NOTE_PORT}/ 响应正常"
+      else
+        warn "笔记站 http://127.0.0.1:${NOTE_PORT}/ 无响应 —— 产物已构建，但没有进程在服务它"
+        warn "启动：cd $REPO_DIR/frontend && node server.js --app note"
+        warn "常驻建议配 systemd（单元示例见 docs/2026-10-19/笔记站上线步骤.md）"
+      fi
+    fi
+
     if [[ -f "$NGINX_CONF" ]]; then
-      for host in cipherws.icu train.cipherws.icu; do
+      # 期望状态不一致：main 与 note 的 80 端口现在都是 301 跳 HTTPS，
+      # train 还是纯 HTTP 直出。所以不能一律要求 200，否则每次都会误报。
+      for host in cipherws.icu train.cipherws.icu note.cipherws.icu; do
         code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
                 -H "Host: $host" 'http://127.0.0.1/' || true)"
-        if [[ "$code" == "200" ]]; then
-          ok "nginx 本机探活 $host → 200"
+        case "$host" in
+          train.cipherws.icu) want='200' ;;
+          *)                  want='301' ;;
+        esac
+        if [[ "$code" == "$want" || "$code" == "200" ]]; then
+          ok "nginx 本机探活 $host → $code"
         else
-          warn "nginx 本机探活 $host → ${code:-无响应}"
+          warn "nginx 本机探活 $host → ${code:-无响应}（期望 $want）"
           warn "  502 = 上游没起；404 = server_name 或 root 没配对；"
           warn "  000 = nginx 没在跑或没监听 80"
+          if [[ "$host" == note.* ]]; then
+            warn "  note 的 502 通常是 8002 上没有进程：cd frontend && node server.js --app note"
+          fi
         fi
       done
     fi
@@ -486,9 +522,14 @@ cat <<'EOF'
 建议手动确认一遍：
   · 主站      http://cipherws.icu/
   · 云间列车  http://train.cipherws.icu/
+  · 池禾笔记  https://note.cipherws.icu/
   · 名言接口  http://cipherws.icu/say/saying?id=1
   · 音频流    http://cipherws.icu/audio/stream?audio=HOYO-MiX%20-%20Da%20Capo.mp3
+  · 笔记接口  https://note.cipherws.icu/api/notes   （401「未登录」= 网关正常）
 
 如果 /say/ 或 /audio/ 返回 502，说明本地笔记本上的后端或 SakuraFrp 隧道掉线。
 此时静态页面仍然正常，只是「每日一句」与音乐播放器取不到数据，属于预期情况。
+
+如果 note 的接口 502，说明笔记本上的 note-gateway(8083) 没起或隧道没映射到它；
+页面本身能打开（静态资源由 nginx 与 8002 提供），只是登录不了。
 EOF
