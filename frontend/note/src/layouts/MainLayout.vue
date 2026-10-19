@@ -38,7 +38,10 @@
         </div>
 
         <RouterLink to="/profile" class="rail__user">
-          <span class="avatar" aria-hidden="true">{{ initial }}</span>
+          <span class="avatar" aria-hidden="true">
+            <img v-if="userStore.userInfo?.avatar" class="avatar__img" :src="userStore.userInfo.avatar" alt="" />
+            <template v-else>{{ initial }}</template>
+          </span>
           <span class="rail__user-name">{{ userStore.displayName }}</span>
         </RouterLink>
 
@@ -270,10 +273,19 @@ onMounted(async () => {
   width: 26px;
   height: 26px;
   border-radius: 50%;
+  overflow: hidden;
   background: var(--accent-soft);
   color: var(--accent-ink);
   font-family: var(--font-serif);
   font-size: var(--fs-sm);
+}
+
+/* 上传过头像时铺满圆形，否则回落到昵称首字 */
+.avatar__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .rail__user-name {

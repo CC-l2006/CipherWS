@@ -12,6 +12,33 @@ spring:
     hikari:
       maximum-pool-size: 10
       minimum-idle: 2
+  servlet:
+    multipart:
+      # 头像上限 2MB，request 给 3MB 留出表单开销
+      max-file-size: 2MB
+      max-request-size: 3MB
+  # 邮件：这里**故意不写 host/port/username/password**。
+  # 原因：只要 spring.mail.host 出现（哪怕是空串），Spring Boot 就会创建
+  # JavaMailSender 和 mail 健康检查，没配密码时整体 /actuator/health 直接变 DOWN。
+  # 不写它 → 没有这个 bean → MailService 自动退化成「把验证码写日志」，
+  # 本地开发不配邮箱也能跑通找回密码/绑定邮箱。
+  #
+  # 真要发信时用环境变量（Spring 会自动映射成 spring.mail.*，无需改本文件）：
+  #   SPRING_MAIL_HOST=smtp.qq.com   SPRING_MAIL_PORT=465
+  #   SPRING_MAIL_USERNAME=you@qq.com  SPRING_MAIL_PASSWORD=邮箱授权码
+  #   NOTE_MAIL_ENABLED=true          MAIL_FROM=you@qq.com
+  mail:
+    default-encoding: UTF-8
+    properties:
+      mail:
+        smtp:
+          # 465 端口走隐式 SSL；若用 587 则把 ssl 换成 starttls
+          auth: true
+          ssl:
+            enable: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
   cloud:
     nacos:
       discovery:
@@ -36,6 +63,15 @@ mybatis:
     map-underscore-to-camel-case: true
 
 note:
+  mail:
+    # 只有这个开关打开、且 spring.mail.host 与 MAIL_USERNAME 都非空时才真发信
+    enabled: ${NOTE_MAIL_ENABLED:false}
+    # 发件人；留空则用 MAIL_USERNAME（大多数邮箱要求两者一致）
+    from: ${MAIL_FROM:}
+  upload:
+    # 头像落盘目录。相对路径是相对**进程工作目录**，生产建议给绝对路径
+    dir: ${NOTE_UPLOAD_DIR:./uploads}
+    max-bytes: 2097152
   jwt:
     # 必须与 note-gateway 的配置一致，否则网关验不过这里签发的 token
     secret: ${NOTE_JWT_SECRET:cipherws-note-dev-secret-change-me-in-production-32bytes}

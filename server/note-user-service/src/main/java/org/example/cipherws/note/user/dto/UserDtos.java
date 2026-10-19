@@ -23,8 +23,14 @@ public final class UserDtos {
     public record LoginRes(String token, UserVo user) {
     }
 
-    /** 修改资料。字段都可空，只更新传了值的那些 */
-    public record ProfileReq(String nickname, String email, String bio, String avatar) {
+    /**
+     * 修改资料。
+     *
+     * **没有 email** —— 换邮箱必须走「发验证码 + 校验」，否则任何人都能
+     * 把自己的邮箱随便改成一个不属于自己的地址，然后拿它去重置别人的密码。
+     * header 里的 avatar 只用于「清空头像」（传空串），正常更换走上传接口。
+     */
+    public record ProfileReq(String nickname, String bio, String avatar) {
     }
 
     /** 修改密码 */
@@ -35,12 +41,28 @@ public final class UserDtos {
     public record ResetPasswordReq(String email, String code, String password) {
     }
 
-    /** 发送验证码 */
-    public record SendCodeReq(String email) {
+    /**
+     * 发送验证码。
+     *
+     * @param purpose reset = 找回密码（邮箱必须已注册）；
+     *                bind  = 绑定邮箱（邮箱不能被别的账号占用）。
+     *                null 按 reset 处理，兼容老调用方。
+     */
+    public record SendCodeReq(String email, String purpose) {
     }
 
-    /** 发送验证码的结果。code 只在「演示/开发」开关打开时才有值 */
-    public record SendCodeRes(String hint, String code) {
+    /**
+     * 发送验证码的结果。
+     *
+     * @param code 只在「没配 SMTP 的本地环境」且开了 note.auth.expose-code 时才有值，
+     *             配了真邮箱就永远返回 null —— 那才是验证码该有的样子。
+     * @param cooldown 距下次可发送的秒数，前端拿它做倒计时
+     */
+    public record SendCodeRes(String hint, String code, int cooldown) {
+    }
+
+    /** 绑定邮箱：新邮箱 + 验证码 */
+    public record BindEmailReq(String email, String code) {
     }
 
     /**

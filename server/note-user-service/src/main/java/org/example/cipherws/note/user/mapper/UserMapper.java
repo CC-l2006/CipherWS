@@ -30,9 +30,17 @@ public interface UserMapper {
 
     int updateProfile(@Param("id") long id,
                       @Param("nickname") String nickname,
-                      @Param("email") String email,
                       @Param("bio") String bio,
                       @Param("avatar") String avatar);
+
+    /** 换绑邮箱。调用前 Service 已确认验证码通过且该邮箱未被别人占用 */
+    int updateEmail(@Param("id") long id, @Param("email") String email);
+
+    /** 只更新头像，不动昵称/简介 —— 上传头像时不该顺带覆盖别的字段 */
+    int updateAvatar(@Param("id") long id, @Param("avatar") String avatar);
+
+    /** 换绑前查重：这个邮箱是否已经被**别的**账号占用 */
+    Long countByEmailExcluding(@Param("userId") long userId, @Param("email") String email);
 
     int updatePassword(@Param("id") long id, @Param("password") String password);
 

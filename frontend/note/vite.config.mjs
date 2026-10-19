@@ -19,6 +19,12 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:8083',
         changeOrigin: true
+      },
+      // 头像等上传文件也走网关（网关对该路径放行、不校验 token），
+      // 不加这条的话开发环境下 <img src="/uploads/..."> 会 404
+      '/uploads': {
+        target: 'http://127.0.0.1:8083',
+        changeOrigin: true
       }
     }
   }

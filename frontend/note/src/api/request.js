@@ -46,11 +46,37 @@ async function loadMock() {
   return mockModule
 }
 
+/** 统一的响应解析：把 HTTP 状态 + 业务信封收敛成 {data,total} 或 ApiError */
+async function parseResponse(res) {
+  let json
+  try {
+    json = await res.json()
+  } catch {
+    throw new ApiError(`响应不是合法 JSON（HTTP ${res.status}）`)
+  }
+  if (!res.ok || json.success !== true) {
+    throw new ApiError(json.errMessage || `请求失败（HTTP ${res.status}）`, res.status)
+  }
+  return { data: json.data, total: json.total }
+}
+
+/** mock 模式下的统一出口：不为 true 一律抛错 */
+function unwrapMock(res) {
+  if (!res || res.success !== true) {
+    throw new ApiError(res?.errMessage, res?.code)
+  }
+  return { data: res.data, total: res.total }
+}
+
+function authHeader() {
+  return getToken() ? { Authorization: `Bearer ${getToken()}` } : {}
+}
+
 /**
  * @param {string} path      以 / 开头的接口路径，例如 '/notes'
  * @param {object} [options]
  * @param {string} [options.method]
- * @param {object} [options.params] 查询参数，undefined / '' 会被剔除
+ * @param {object} [options.params] 查询参数，undefined / null / '' 会被剔除
  * @param {object} [options.body]   请求体
  * @returns {Promise<{data:any,total?:number}>}
  */
@@ -68,11 +94,12 @@ export async function request(path, { method = 'GET', params, body } = {}) {
   // —— 生产产物里连懒加载 chunk 都不会剩下（复用常量则无法折叠）。
   if (import.meta.env.VITE_API_MODE !== 'http') {
     const { mockRequest } = await loadMock()
-    const res = await mockRequest({ method: method.toUpperCase(), path, params: cleanParams, body })
-    if (!res || res.success !== true) {
-      throw new ApiError(res?.errMessage, res?.code)
-    }
-    return { data: res.data, total: res.total }
+    return unwrapMock(await mockRequest({
+      method: method.toUpperCase(),
+      path,
+      params: cleanParams,
+      body
+    }))
   }
 
   const qs = new URLSearchParams(cleanParams).toString()
@@ -82,28 +109,59 @@ export async function request(path, { method = 'GET', params, body } = {}) {
   try {
     res = await fetch(url, {
       method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(getToken() ? { Authorization: `Bearer ${getToken()}` } : {})
-      },
+      headers: { 'Content-Type': 'application/json', ...authHeader() },
       body: body === undefined ? undefined : JSON.stringify(body)
     })
-  } catch (err) {
+  } catch {
     throw new ApiError('网络请求失败，请检查连接')
   }
+  return parseResponse(res)
+}
 
-  let json
+/**
+ * 上传文件（multipart/form-data）。
+ *
+ * http 模式下**绝不能手写 Content-Type** —— 必须让浏览器自动带上
+ * `multipart/form-data; boundary=...`，自己写会丢掉 boundary，后端直接解析失败。
+ *
+ * mock 模式没有后端，把文件读成 data URL 交给 mock 存进 localStorage。
+ */
+export async function upload(path, file) {
+  if (import.meta.env.VITE_API_MODE !== 'http') {
+    const { mockRequest } = await loadMock()
+    const dataUrl = await readAsDataUrl(file)
+    return unwrapMock(await mockRequest({
+      method: 'POST',
+      path,
+      params: {},
+      body: { dataUrl, name: file.name, type: file.type, size: file.size }
+    }))
+  }
+
+  const form = new FormData()
+  form.append('file', file)
+
+  let res
   try {
-    json = await res.json()
+    res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      // 注意这里没有 Content-Type，见方法注释
+      headers: authHeader(),
+      body: form
+    })
   } catch {
-    throw new ApiError(`响应不是合法 JSON（HTTP ${res.status}）`)
+    throw new ApiError('网络请求失败，请检查连接')
   }
+  return parseResponse(res)
+}
 
-  if (!res.ok || json.success !== true) {
-    throw new ApiError(json.errMessage || `请求失败（HTTP ${res.status}）`, res.status)
-  }
-
-  return { data: json.data, total: json.total }
+function readAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new ApiError('读取图片失败，请重试'))
+    reader.readAsDataURL(file)
+  })
 }
 
 export default request

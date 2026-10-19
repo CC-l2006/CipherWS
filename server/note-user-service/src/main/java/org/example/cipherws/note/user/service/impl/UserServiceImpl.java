@@ -7,11 +7,14 @@ import org.example.cipherws.note.user.dto.UserDtos.LoginRes;
 import org.example.cipherws.note.user.dto.UserDtos.SendCodeRes;
 import org.example.cipherws.note.user.dto.UserDtos.UserVo;
 import org.example.cipherws.note.user.mapper.UserMapper;
+import org.example.cipherws.note.user.service.AvatarService;
+import org.example.cipherws.note.user.service.MailService;
 import org.example.cipherws.note.user.service.UserService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.security.SecureRandom;
 import java.time.format.DateTimeFormatter;
@@ -23,7 +26,7 @@ import java.util.regex.Pattern;
  * 用户服务实现。
  *
  * 数据访问全部走 {@link UserMapper}（MyBatis），这一层只负责业务判断：
- * 校验、加密、签发令牌、写日志。SQL 不在这个文件里。
+ * 校验、加密、签发令牌、验证码、写日志。SQL 不在这个文件里。
  */
 @Service
 public class UserServiceImpl implements UserService {
@@ -50,19 +53,45 @@ public class UserServiceImpl implements UserService {
     /** 新用户初始 AI 额度 */
     private static final int INITIAL_QUOTA = 5;
 
+    /** 验证码有效期 5 分钟 */
+    private static final long CODE_TTL_MILLIS = 5 * 60_000L;
+    /** 同一个邮箱两次发送之间至少间隔 60 秒，防刷 */
+    private static final int RESEND_COOLDOWN_SECONDS = 60;
+    /** 同一个码最多试错 5 次 */
+    private static final int MAX_CODE_ATTEMPTS = 5;
+
+    private static final String PURPOSE_RESET = "reset";
+    private static final String PURPOSE_BIND = "bind";
+
     private final UserMapper userMapper;
+    private final MailService mailService;
+    private final AvatarService avatarService;
 
     /** 只在用户服务里用，所以不放公共模块 */
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder(10);
 
     /**
-     * 验证码暂存：邮箱 -> (验证码, 过期时间戳)。
+     * 验证码暂存：邮箱 -> 码。
      * 放内存是刻意的取舍：单实例够用，且省掉一张表和一次清理任务。
      * 将来多实例部署时要换成 Redis，否则在 A 实例发的码到 B 实例校验不过。
      */
     private final Map<String, CodeEntry> codes = new ConcurrentHashMap<>();
 
-    private record CodeEntry(String code, long expireAt) {
+    /** 邮箱 -> 上次发送时间戳，用于 60 秒频控 */
+    private final Map<String, Long> lastSentAt = new ConcurrentHashMap<>();
+
+    /** 一个验证码的全部状态。attempts 可变，所以不用 record */
+    private static final class CodeEntry {
+        private final String code;
+        private final String purpose;
+        private final long expireAt;
+        private int attempts;
+
+        private CodeEntry(String code, String purpose, long expireAt) {
+            this.code = code;
+            this.purpose = purpose;
+            this.expireAt = expireAt;
+        }
     }
 
     @Value("${note.jwt.secret}")
@@ -73,14 +102,19 @@ public class UserServiceImpl implements UserService {
 
     /**
      * 演示开关：把验证码回传给前端。
-     * 默认 true 是为了让别人克隆下来就能跑通「找回密码」全流程；
+     * 默认 true 是为了让别人克隆下来就能跑通「找回密码 / 绑定邮箱」全流程；
      * 生产环境必须设 NOTE_EXPOSE_CODE=false，否则任何人拿到邮箱就能重置密码。
+     *
+     * 注意：只有**没配 SMTP**时才会真的把码回给前端 —— 一旦配了真邮箱，
+     * 这里就不再回传，免得配好了邮箱反而还在响应里漏码。
      */
     @Value("${note.auth.expose-code:true}")
     private boolean exposeCode;
 
-    public UserServiceImpl(UserMapper userMapper) {
+    public UserServiceImpl(UserMapper userMapper, MailService mailService, AvatarService avatarService) {
         this.userMapper = userMapper;
+        this.mailService = mailService;
+        this.avatarService = avatarService;
     }
 
     @Override
@@ -91,7 +125,7 @@ public class UserServiceImpl implements UserService {
         // 长度按「字符数」算，与建表时 VARCHAR(20) 的口径一致（MySQL 的
         // VARCHAR(20) 指 20 个字符而不是 20 字节，一个汉字占 1 个字符）。
         // 用 codePointCount 而不是 name.length()：后者会把代理对算成 2。
-        int nameLen = name.codePointCount(0, name.length());
+        int nameLen = codePointLength(name);
         if (nameLen < USERNAME_MIN || nameLen > USERNAME_MAX) {
             throw new BusinessException("账号需为 2-20 个字符");
         }
@@ -156,25 +190,56 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public SendCodeRes issueCode(String email) {
-        String mail = email == null ? "" : email.trim();
+    public SendCodeRes issueCode(Long currentUserId, String email, String purpose) {
+        String mail = email == null ? "" : email.trim().toLowerCase();
+        String use = PURPOSE_BIND.equalsIgnoreCase(purpose) ? PURPOSE_BIND : PURPOSE_RESET;
+
         if (!EMAIL.matcher(mail).matches()) {
             throw new BusinessException("邮箱格式不正确");
         }
-        if (userMapper.countByEmail(mail) == 0) {
-            throw new BusinessException("该邮箱未注册");
+
+        if (PURPOSE_RESET.equals(use)) {
+            // 找回密码：邮箱必须是某个已有账号的绑定邮箱
+            if (userMapper.countByEmail(mail) == 0) {
+                throw new BusinessException("该邮箱未注册");
+            }
+        } else {
+            // 绑定邮箱：这个地址不能被别人占着
+            if (currentUserId == null) {
+                throw new BusinessException("未登录，请先登录");
+            }
+            NoteUser me = userMapper.findById(currentUserId);
+            if (me != null && mail.equalsIgnoreCase(me.getEmail())) {
+                throw new BusinessException("这个邮箱已经绑定到当前账号了");
+            }
+            if (userMapper.countByEmailExcluding(currentUserId, mail) > 0) {
+                throw new BusinessException("该邮箱已被其他账号绑定");
+            }
+        }
+
+        // 60 秒频控：放在用途校验之后，避免「不存在也告诉你发太快」泄露信息
+        long now = System.currentTimeMillis();
+        Long last = lastSentAt.get(mail);
+        if (last != null) {
+            long wait = RESEND_COOLDOWN_SECONDS - (now - last) / 1000;
+            if (wait > 0) {
+                throw new BusinessException("验证码发送过于频繁，请 " + wait + " 秒后再试");
+            }
         }
 
         String code = String.format("%06d", new SecureRandom().nextInt(1_000_000));
-        codes.put(mail.toLowerCase(), new CodeEntry(code, System.currentTimeMillis() + 5 * 60_000L));
+        codes.put(mail, new CodeEntry(code, use, now + CODE_TTL_MILLIS));
+        lastSentAt.put(mail, now);
 
-        // 真实环境应该走邮件发送；这里把验证码写日志，便于本地联调时不用配 SMTP
-        System.out.printf("[note-user] 验证码邮件（模拟发送）to=%s code=%s%n", mail, code);
+        mailService.sendCode(mail, code, use);
 
-        String hint = exposeCode
-                ? "演示环境：验证码已直接返回，无需查收邮件"
-                : "验证码已发送，5 分钟内有效";
-        return new SendCodeRes(hint, exposeCode ? code : null);
+        boolean devMode = !mailService.isEnabled();
+        String hint = devMode
+                ? "本地未配置邮箱服务，验证码见服务端日志"
+                : "验证码已发送至 " + mail + "，5 分钟内有效";
+        // 只有「没配真邮箱」且开了演示开关，才把码回给前端
+        String returnedCode = (devMode && exposeCode) ? code : null;
+        return new SendCodeRes(hint, returnedCode, RESEND_COOLDOWN_SECONDS);
     }
 
     @Override
@@ -184,24 +249,12 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("新密码至少 6 位");
         }
 
-        CodeEntry entry = codes.get(mail);
-        if (entry == null) {
-            throw new BusinessException("请先获取验证码");
-        }
-        if (entry.expireAt() < System.currentTimeMillis()) {
-            codes.remove(mail);
-            throw new BusinessException("验证码已过期，请重新获取");
-        }
-        if (!entry.code().equals(code == null ? "" : code.trim())) {
-            throw new BusinessException("验证码不正确");
-        }
+        consumeCode(mail, PURPOSE_RESET, code);
 
         int updated = userMapper.updatePasswordByEmail(mail, passwordEncoder.encode(newPassword));
         if (updated == 0) {
             throw new BusinessException("该邮箱未注册");
         }
-        // 用完立刻失效，避免同一个码被重复使用
-        codes.remove(mail);
     }
 
     @Override
@@ -214,28 +267,69 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public UserVo updateProfile(long userId, String nickname, String email, String bio, String avatar) {
+    public UserVo updateProfile(long userId, String nickname, String bio, String avatar) {
         UserVo current = profile(userId);
 
         String name = nickname == null ? current.nickname() : nickname.trim();
-        String mail = email == null ? current.email() : email.trim();
         String intro = bio == null ? current.bio() : bio.trim();
         String pic = avatar == null ? current.avatar() : avatar.trim();
 
         if (name.isEmpty()) {
             throw new BusinessException("昵称不能为空");
         }
-        if (name.length() > 20) {
+        // 昵称也按字符数算：中文昵称不该因为「三个字算三个字节」被长度限制卡住
+        if (codePointLength(name) > 20) {
             throw new BusinessException("昵称最多 20 个字符");
         }
-        if (!mail.isEmpty() && !EMAIL.matcher(mail).matches()) {
-            throw new BusinessException("邮箱格式不正确");
-        }
-        if (intro.length() > 120) {
+        if (codePointLength(intro) > 120) {
             throw new BusinessException("个人简介最多 120 个字符");
         }
+        // 头像只允许两种来源：本站上传的 /uploads/**，或显式清空。
+        // 不允许随便填外链 —— 那是个能把任意第三方资源塞进页面的口子。
+        if (!pic.isEmpty() && !pic.startsWith("/uploads/")) {
+            throw new BusinessException("头像请通过上传功能设置");
+        }
 
-        userMapper.updateProfile(userId, name, mail, intro, pic);
+        userMapper.updateProfile(userId, name, intro, pic);
+        return profile(userId);
+    }
+
+    @Override
+    public UserVo uploadAvatar(long userId, MultipartFile file) {
+        UserVo current = profile(userId);
+        String url = avatarService.save(userId, file);
+
+        userMapper.updateAvatar(userId, url);
+        // 新头像落库后再删旧文件：即使删失败也只是留个孤儿文件，不影响使用
+        avatarService.deleteQuietly(current.avatar());
+
+        writeUserLog(userId, "更换头像", "上传了新头像");
+        return profile(userId);
+    }
+
+    @Override
+    public UserVo bindEmail(long userId, String email, String code) {
+        String mail = email == null ? "" : email.trim().toLowerCase();
+        if (!EMAIL.matcher(mail).matches()) {
+            throw new BusinessException("邮箱格式不正确");
+        }
+
+        NoteUser me = userMapper.findById(userId);
+        if (me == null) {
+            throw new BusinessException("用户不存在");
+        }
+        if (mail.equalsIgnoreCase(me.getEmail())) {
+            throw new BusinessException("这个邮箱已经绑定到当前账号了");
+        }
+        if (userMapper.countByEmailExcluding(userId, mail) > 0) {
+            throw new BusinessException("该邮箱已被其他账号绑定");
+        }
+
+        // 先验码再改库：验证码不对就什么都不动
+        consumeCode(mail, PURPOSE_BIND, code);
+
+        userMapper.updateEmail(userId, mail);
+        writeUserLog(userId, "绑定邮箱", "绑定邮箱 " + maskEmail(mail));
         return profile(userId);
     }
 
@@ -259,6 +353,36 @@ public class UserServiceImpl implements UserService {
     /* ------------------------------ 内部工具 ------------------------------ */
 
     /**
+     * 校验并消费一个验证码。
+     *
+     * 「消费」是指校验通过后立刻从内存里删掉 —— 同一个码不能用第二次，
+     * 否则被人瞄到一眼就能反复提交。
+     */
+    private void consumeCode(String mail, String purpose, String input) {
+        CodeEntry entry = codes.get(mail);
+        if (entry == null) {
+            throw new BusinessException("请先获取验证码");
+        }
+        if (entry.expireAt < System.currentTimeMillis()) {
+            codes.remove(mail);
+            throw new BusinessException("验证码已过期，请重新获取");
+        }
+        if (!purpose.equals(entry.purpose)) {
+            // 找回密码的码不能拿去绑邮箱，反之亦然
+            throw new BusinessException("验证码用途不匹配，请重新获取");
+        }
+        if (entry.attempts >= MAX_CODE_ATTEMPTS) {
+            codes.remove(mail);
+            throw new BusinessException("验证码错误次数过多，请重新获取");
+        }
+        if (!entry.code.equals(input == null ? "" : input.trim())) {
+            entry.attempts++;
+            throw new BusinessException("验证码不正确");
+        }
+        codes.remove(mail);
+    }
+
+    /**
      * 实体 -> 对外 VO。
      *
      * 这一步看着啰嗦，但它是**唯一**能保证 password 不外泄的地方：
@@ -276,6 +400,20 @@ public class UserServiceImpl implements UserService {
                 u.getAiQuota(),
                 u.getEnabled(),
                 u.getCreatedAt() == null ? null : u.getCreatedAt().format(TIME_FMT));
+    }
+
+    /** 按 Unicode 码点算长度，一个汉字 = 1 */
+    private static int codePointLength(String s) {
+        return s.codePointCount(0, s.length());
+    }
+
+    /** 日志里别写完整邮箱：a***@example.com */
+    private static String maskEmail(String mail) {
+        int at = mail.indexOf('@');
+        if (at <= 1) {
+            return "***" + (at >= 0 ? mail.substring(at) : "");
+        }
+        return mail.charAt(0) + "***" + mail.substring(at);
     }
 
     /** 登录等行为要落日志（需求 4.7.1）。日志失败不能影响主流程，所以单独 try。 */

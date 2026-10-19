@@ -57,6 +57,14 @@ spring:
               filters:
                 - StripPrefix=1
 
+            # 头像等静态文件：**不剥前缀**，原样转给用户服务（它挂在 /uploads/**）。
+            # 不能放进 /api/** 是因为 <img src> 带不了 Authorization 头，
+            # 走需要鉴权的路由会一律 401。文件名是「用户id-随机串」，不可枚举。
+            - id: note-user-uploads
+              uri: lb://note-user-service
+              predicates:
+                - Path=/uploads/**
+
 # JWT 签名密钥。
 # 生产环境必须通过环境变量 NOTE_JWT_SECRET 覆盖，且四个 note 服务不共享这个密钥
 # —— 只有网关需要它来验签。

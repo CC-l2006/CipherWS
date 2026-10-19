@@ -28,6 +28,13 @@ CREATE DATABASE IF NOT EXISTS `CipherWS`
 
 USE `CipherWS`;
 
+-- 声明「本脚本是按 utf8mb4 发过来的」。
+-- 不加这一句的话，客户端若用 latin1/gbk 连接（Windows 上 mysql.exe 的默认
+-- 行为取决于系统代码页），下面 `title` 的中文默认值 '无标题笔记' 会被判定为
+-- 非法默认值，建表直接失败（ERROR 1067 Invalid default value for 'title'）。
+-- 有了它，就不依赖使用者记不记得加 --default-character-set。
+SET NAMES utf8mb4;
+
 
 -- -----------------------------------------------------------------------------
 -- 1. note_user 用户表

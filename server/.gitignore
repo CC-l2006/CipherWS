@@ -31,3 +31,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# 用户上传的头像等文件，不入库
+uploads/

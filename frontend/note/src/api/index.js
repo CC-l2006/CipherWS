@@ -4,7 +4,7 @@
  * mock / http 两种模式的差异全部收敛在 request.js，这里不需要关心。
  */
 
-import { request } from './request.js'
+import { request, upload } from './request.js'
 
 /* ---------------- 认证 ---------------- */
 export const authApi = {
@@ -18,9 +18,16 @@ export const authApi = {
 /* ---------------- 用户中心 ---------------- */
 export const userApi = {
   profile: () => request('/user/profile'),
+  // 注意：换邮箱不走这里，必须走 sendBindCode + bindEmail 两步（要验证码）
   updateProfile: (body) => request('/user/profile', { method: 'PUT', body }),
   changePassword: (body) => request('/user/password', { method: 'PUT', body }),
-  quota: () => request('/user/quota')
+  quota: () => request('/user/quota'),
+  /** 绑定邮箱第一步：给新邮箱发验证码 */
+  sendBindCode: (email) => request('/user/email/code', { method: 'POST', body: { email } }),
+  /** 绑定邮箱第二步：带上验证码换绑 */
+  bindEmail: (body) => request('/user/email', { method: 'PUT', body }),
+  /** 上传头像（multipart） */
+  uploadAvatar: (file) => upload('/user/avatar', file)
 }
 
 /* ---------------- 笔记 ---------------- */

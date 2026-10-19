@@ -48,11 +48,22 @@
     <update id="updateProfile">
         UPDATE `note_user`
         SET `nickname` = #{nickname},
-            `email`    = #{email},
             `bio`      = #{bio},
             `avatar`   = #{avatar}
         WHERE `id` = #{id}
     </update>
+
+    <update id="updateEmail">
+        UPDATE `note_user` SET `email` = #{email} WHERE `id` = #{id}
+    </update>
+
+    <update id="updateAvatar">
+        UPDATE `note_user` SET `avatar` = #{avatar} WHERE `id` = #{id}
+    </update>
+
+    <select id="countByEmailExcluding" resultType="long">
+        SELECT COUNT(*) FROM `note_user` WHERE `email` = #{email} AND `id` &lt;&gt; #{userId}
+    </select>
 
     <update id="updatePassword">
         UPDATE `note_user` SET `password` = #{password} WHERE `id` = #{id}

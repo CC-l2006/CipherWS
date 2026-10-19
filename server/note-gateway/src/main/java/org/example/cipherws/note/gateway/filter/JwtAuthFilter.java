@@ -61,6 +61,15 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
     /** 运维探活也不该要 token */
     private static final List<String> ACTUATOR = List.of("/actuator/**");
 
+    /**
+     * 公开的静态资源：头像。
+     *
+     * 必须放行 —— 浏览器渲染 {@code <img src="/uploads/avatar/x.png">} 时
+     * 不会带 Authorization 头，走鉴权路由只有一个结果：全站头像 401。
+     * 安全性由「文件名不可枚举」保证（用户id-16位随机串.ext）。
+     */
+    private static final List<String> PUBLIC_STATIC = List.of("/uploads/**");
+
     @Value("${note.jwt.secret}")
     private String secret;
 
@@ -109,6 +118,11 @@ public class JwtAuthFilter implements GlobalFilter, Ordered {
             }
         }
         for (String pattern : ACTUATOR) {
+            if (MATCHER.match(pattern, path)) {
+                return true;
+            }
+        }
+        for (String pattern : PUBLIC_STATIC) {
             if (MATCHER.match(pattern, path)) {
                 return true;
             }

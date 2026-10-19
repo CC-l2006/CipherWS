@@ -188,15 +188,86 @@ on('GET', /^\/user\/profile$/, ({ db, user }) => ok(publicUser(user)))
 
 on('PUT', /^\/user\/profile$/, ({ db, user, body }) => {
   const nickname = String(body?.nickname || '').trim()
-  const email = String(body?.email || '').trim()
   if (!nickname) return fail('昵称不能为空')
-  if (nickname.length > 20) return fail('昵称最多 20 个字符')
-  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('邮箱格式不正确')
+  if ([...nickname].length > 20) return fail('昵称最多 20 个字符')
+  if ([...(body?.bio || '')].length > 120) return fail('个人简介最多 120 个字符')
+
+  // 邮箱**不在这里改**：必须走 sendBindCode + bindEmail 并验码，
+  // 否则一个人可以随便填别人的邮箱，再拿它去重置别人的密码。
+  // 头像允许两种值：mock 里存的是 data URL，真实后端是 /uploads/**。
+  const avatar = String(body?.avatar ?? user.avatar ?? '')
+  if (avatar && !avatar.startsWith('data:image/') && !avatar.startsWith('/uploads/')) {
+    return fail('头像请通过上传功能设置')
+  }
 
   user.nickname = nickname
-  user.email = email
   user.bio = String(body?.bio || '').slice(0, 120)
-  user.avatar = String(body?.avatar || '')
+  user.avatar = avatar
+  saveDb()
+  return ok(publicUser(user))
+})
+
+/* ---------------- 邮箱验证码（mock 内存态，刷新即失效） ---------------- */
+const mailCodes = new Map()
+
+on('POST', /^\/user\/email\/code$/, ({ db, user, body }) => {
+  const email = String(body?.email || '').trim().toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('邮箱格式不正确')
+  if (email === String(user.email || '').toLowerCase()) return fail('这个邮箱已经绑定到当前账号了')
+  if (db.users.some((u) => u.id !== user.id && String(u.email || '').toLowerCase() === email)) {
+    return fail('该邮箱已被其他账号绑定')
+  }
+
+  const now = Date.now()
+  const prev = mailCodes.get(email)
+  if (prev && now - prev.sentAt < 60000) {
+    return fail(`验证码发送过于频繁，请 ${Math.ceil((60000 - (now - prev.sentAt)) / 1000)} 秒后再试`)
+  }
+
+  const code = String(Math.floor(100000 + Math.random() * 900000))
+  mailCodes.set(email, { code, purpose: 'bind', expireAt: now + 5 * 60_000, attempts: 0, sentAt: now })
+  return ok({ hint: '演示环境：验证码已直接返回，无需查收邮件', code, cooldown: 60 })
+})
+
+on('PUT', /^\/user\/email$/, ({ db, user, body }) => {
+  const email = String(body?.email || '').trim().toLowerCase()
+  const code = String(body?.code || '').trim()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return fail('邮箱格式不正确')
+  if (email === String(user.email || '').toLowerCase()) return fail('这个邮箱已经绑定到当前账号了')
+  if (db.users.some((u) => u.id !== user.id && String(u.email || '').toLowerCase() === email)) {
+    return fail('该邮箱已被其他账号绑定')
+  }
+
+  const entry = mailCodes.get(email)
+  if (!entry) return fail('请先获取验证码')
+  if (entry.expireAt < Date.now()) {
+    mailCodes.delete(email)
+    return fail('验证码已过期，请重新获取')
+  }
+  if (entry.purpose !== 'bind') return fail('验证码用途不匹配，请重新获取')
+  if (entry.attempts >= 5) {
+    mailCodes.delete(email)
+    return fail('验证码错误次数过多，请重新获取')
+  }
+  if (entry.code !== code) {
+    entry.attempts += 1
+    return fail('验证码不正确')
+  }
+
+  mailCodes.delete(email)
+  user.email = email
+  saveDb()
+  return ok(publicUser(user))
+})
+
+on('POST', /^\/user\/avatar$/, ({ user, body }) => {
+  const dataUrl = String(body?.dataUrl || '')
+  if (!dataUrl.startsWith('data:image/')) return fail('只支持 PNG / JPG / WebP 格式的图片')
+  // 演示模式存的是 base64，localStorage 只有 ~5MB，所以卡得比后端严
+  if (Number(body?.size || 0) > 500 * 1024) {
+    return fail('演示模式请上传 500KB 以内的图片（数据存在浏览器本地）')
+  }
+  user.avatar = dataUrl
   saveDb()
   return ok(publicUser(user))
 })
