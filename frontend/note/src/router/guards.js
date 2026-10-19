@@ -2,7 +2,7 @@ import router from './index.js'
 import { useUserStore } from '@/stores/user.js'
 import { useToastStore } from '@/stores/toast.js'
 
-const APP_NAME = 'CipherWS 笔记'
+const APP_NAME = '池禾笔记'
 
 // 未登录也能访问的页面
 const WHITE_LIST = ['/login', '/register', '/forgot-password']

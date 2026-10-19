@@ -14,7 +14,7 @@
             />
           </svg>
         </span>
-        <span class="rail__name">CipherWS 笔记</span>
+        <span class="rail__name">池禾笔记</span>
       </div>
 
       <nav class="rail__nav" aria-label="主导航">

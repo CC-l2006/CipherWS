@@ -152,17 +152,6 @@
             </div>
           </form>
         </section>
-
-        <!-- 演示环境专用：把 mock 数据恢复到初始状态 -->
-        <section v-if="isMock" class="card sheet">
-          <h2 class="card__title">演示数据</h2>
-          <p class="card__hint">
-            当前数据保存在浏览器本地。重置后会回到初始的示例笔记与账号。
-          </p>
-          <div class="form__actions">
-            <AppButton variant="ghost" :loading="resetting" @click="resetDemo">重置演示数据</AppButton>
-          </div>
-        </section>
       </div>
     </div>
   </div>
@@ -170,15 +159,12 @@
 
 <script setup>
 import { computed, onUnmounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import AppField from '@/components/AppField.vue'
 import AppButton from '@/components/AppButton.vue'
-import { userApi, adminApi } from '@/api/index.js'
+import { userApi } from '@/api/index.js'
 import { useUserStore } from '@/stores/user.js'
 import { useToastStore } from '@/stores/toast.js'
-import { isMock } from '@/api/request.js'
 
-const router = useRouter()
 const userStore = useUserStore()
 const toast = useToastStore()
 
@@ -365,24 +351,6 @@ async function savePassword() {
     passwordErrors.oldPassword = err.message
   } finally {
     savingPassword.value = false
-  }
-}
-
-/* ---------- 演示数据重置 ---------- */
-const resetting = ref(false)
-
-async function resetDemo() {
-  if (!window.confirm('重置后当前的笔记与修改都会丢失，确定吗？')) return
-  resetting.value = true
-  try {
-    await adminApi.resetMock()
-    await userStore.logout()
-    toast.success('演示数据已重置，请重新登录')
-    router.replace('/login')
-  } catch (err) {
-    toast.error(err.message)
-  } finally {
-    resetting.value = false
   }
 }
 </script>

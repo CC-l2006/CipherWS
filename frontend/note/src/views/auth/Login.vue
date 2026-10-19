@@ -32,9 +32,6 @@
         <span class="links__sep" aria-hidden="true">·</span>
         <RouterLink to="/forgot-password">忘记密码</RouterLink>
       </span>
-      <p v-if="isMock" class="demo">
-        演示账号：普通用户 <code>demo / demo123</code>，管理员 <code>admin / admin123</code>
-      </p>
     </template>
   </AuthLayout>
 </template>
@@ -47,7 +44,6 @@ import AppField from '@/components/AppField.vue'
 import AppButton from '@/components/AppButton.vue'
 import { useUserStore } from '@/stores/user.js'
 import { useToastStore } from '@/stores/toast.js'
-import { isMock } from '@/api/request.js'
 
 const route = useRoute()
 const router = useRouter()

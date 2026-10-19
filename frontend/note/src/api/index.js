@@ -79,8 +79,5 @@ export const adminApi = {
   removeAnnouncement: (id) => request(`/admin/announcements/${id}`, { method: 'DELETE' }),
 
   logs: (params) => request('/admin/logs', { params }),
-  stats: () => request('/admin/stats'),
-
-  /** 演示用：把 mock 数据恢复到初始状态（http 模式下后端没有这个接口） */
-  resetMock: () => request('/mock/reset', { method: 'POST' })
+  stats: () => request('/admin/stats')
 }

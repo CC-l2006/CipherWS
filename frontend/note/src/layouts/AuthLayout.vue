@@ -2,12 +2,8 @@
   <div class="auth">
     <div class="auth__col">
       <div class="auth__brand">
-        <span class="auth__mark" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
-            <path d="M6 3h9a2 2 0 0 1 2 2v16l-6.5-3.6L4 21V5a2 2 0 0 1 2-2z" />
-          </svg>
-        </span>
-        <span class="auth__name">CipherWS 笔记</span>
+        <!-- 直接用品牌图：logo 本身已经含「池禾笔记」字样，再单独排一段文字就重复了 -->
+        <img class="auth__logo" src="/logo.png" alt="池禾笔记" width="76" height="74" />
       </div>
 
       <div class="auth__sheet sheet">
@@ -52,17 +48,15 @@ defineProps({
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: var(--sp-2);
   margin-bottom: var(--sp-5);
-  color: var(--accent);
 }
 
-.auth__name {
-  font-family: var(--font-serif);
-  font-size: var(--fs-md);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: var(--ink);
+/* 品牌图自带圆角与米色底，所以这里不再另加边框/背景，避免出现双层圆角 */
+.auth__logo {
+  width: 76px;
+  height: auto;
+  display: block;
+  border-radius: 14px;
 }
 
 .auth__sheet {

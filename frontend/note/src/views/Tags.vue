@@ -15,7 +15,7 @@
       <AppEmpty
         v-else-if="!tags.length"
         title="还没有标签"
-        description="建几个标签（比如「毕业设计」「读书」），写笔记时就能一键归类。"
+        description="建几个标签（比如「池禾笔记」「读书」），写笔记时就能一键归类。"
       >
         <template #action>
           <AppButton variant="primary" @click="openCreate">新建标签</AppButton>
