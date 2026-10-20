@@ -119,7 +119,7 @@ switch ($Action) {
         # Audio lives outside the repository now (131 MB of music files are
         # .gitignore'd). Point say-service at the on-disk directory so it can
         # still stream audio; see deploy/music/ and
-        # docs/2026-10-5/audio-resources.md.
+        # docs/项目架构文档.md (section 8: audio assets live outside the repo).
         $musicDir = Join-Path $projectRoot 'deploy\music'
         if (Test-Path $musicDir) {
             if (-not $env:AUDIO_MUSIC_PATH) {

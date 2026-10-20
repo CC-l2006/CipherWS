@@ -31,7 +31,7 @@ CipherWS/
 
 > 音频资源（`server/cipherws-say-service/.../music/`，约 131 MB）**不入库**，
 > 改为放在仓库外的 `deploy/music/`，由 `deploy/run-services.ps1` 通过
-> `AUDIO_MUSIC_PATH` 注入。详见 [docs/2026-10-5/音频资源说明.md](docs/2026-10-5/音频资源说明.md)。
+> `AUDIO_MUSIC_PATH` 注入。详见 [docs/项目架构文档.md](docs/项目架构文档.md) 第八节。
 
 ## 二、后端模块（server/）
 
@@ -73,27 +73,21 @@ npm run dev:train          # 列车站 → http://127.0.0.1:8001
 
 验证：`curl http://127.0.0.1:8080/say/saying?id=1`
 
-> **Windows 本地启动（不依赖 Docker）**：项目提供了 `deploy/` 一键脚本，
-> 用项目内的 JDK 17 与 Nacos 3.3.0-RC 起全套服务，不污染系统环境变量：
+> **Windows 本地启动（不依赖 Docker）**：项目提供了一键脚本，
+> 用项目内的 JDK 17 与 Nacos 3.3.0-RC 起全套 8 个后端服务，不污染系统环境变量：
 >
 > ```powershell
-> powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\start-nacos.ps1
-> powershell -NoProfile -ExecutionPolicy Bypass -File .\deploy\run-services.ps1 -Action start
+> powershell -NoProfile -ExecutionPolicy Bypass -File .\docs\startupCommand\Backend\启动后端.ps1
 > ```
 >
-> 详见 [docs/2026-10-5/本地部署说明.md](docs/2026-10-5/本地部署说明.md)。
+> 详见 [docs/项目架构文档.md](docs/项目架构文档.md) 第九节。
 
 ## 四、文档索引
 
 | 文档 | 内容 |
 | --- | --- |
-| [docs/2026-10-19/笔记站上线步骤.md](docs/2026-10-19/笔记站上线步骤.md) | `note.cipherws.icu` 上线：链路图、systemd、上线顺序、证书、更新与启动脚本 |
-| [docs/2026-10-13/笔记系统接口文档.md](docs/2026-10-13/笔记系统接口文档.md) | 笔记系统接口契约：网关路由、统一响应、全部接口、MyBatis 分层、安全要点 |
-| [docs/2026-10-19/邮箱验证码与头像上传.md](docs/2026-10-19/邮箱验证码与头像上传.md) | 验证码怎么真发出去（SMTP 配置与排查）、头像上传的四种校验 |
-| [docs/2026-10-13/项目环境文档.md](docs/2026-10-13/项目环境文档.md) | 环境总览快照（2026-10-13）：本机工具链、依赖版本、服务器实测、待修问题清单 |
-| [docs/2026-10-12/HTTPS证书配置.md](docs/2026-10-12/HTTPS证书配置.md) | SSL 证书上传、校验证书与私钥配对、443 配置、续期与回滚 |
-| [docs/2026-10-10/前端双站点结构.md](docs/2026-10-10/前端双站点结构.md) | 前端 `main/` + `train/` 结构、命令速查、nginx server 块（笔记站的 `note/` 见上线步骤） |
-| [docs/2026-10-5/本地部署说明.md](docs/2026-10-5/本地部署说明.md) | Windows 本地部署：项目内 JDK/Nacos、端口规划（含笔记站）、启停脚本、鉴权说明 |
-| [docs/2026-10-5/项目本地工具链.md](docs/2026-10-5/项目本地工具链.md) | 项目内 JDK 17 工具链：安装脚本与用法 |
-| [docs/2026-10-5/音频资源说明.md](docs/2026-10-5/音频资源说明.md) | 音频为何移出版本库、放在哪、如何生效 |
-| [server/接口文档.md](server/接口文档.md) | 主站后端接口说明（笔记站见上面的笔记系统接口文档） |
+| [docs/项目架构文档.md](docs/项目架构文档.md) | **总文档**：两台服务器的分工、总体架构图、技术栈版本、请求链路、数据模型、**完整环境准备清单**、部署步骤、端口与变量总表、故障排查、安全要点 |
+| [docs/2026-10-19/笔记站上线步骤.md](docs/2026-10-19/笔记站上线步骤.md) | `note.cipherws.icu` 上线细节：链路图、systemd 单元、上线顺序、证书 |
+| [docs/2026-10-19/邮箱验证码与头像上传.md](docs/2026-10-19/邮箱验证码与头像上传.md) | SMTP 配置（QQ/163/Gmail）与排查表、头像上传的四层校验 |
+| [server/接口文档.md](server/接口文档.md) | 主站后端接口说明 |
+| [server/sql/note-schema.sql](server/sql/note-schema.sql) | 笔记系统 9 张表的建表脚本（含种子数据） |

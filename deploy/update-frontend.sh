@@ -46,7 +46,7 @@ MAIN_SERVICE="${MAIN_SERVICE:-auto}"   # auto = 自动探测 cipherws-web* 单�
 MAIN_PORT="${MAIN_PORT:-8000}"
 NGINX_CONF="${NGINX_CONF:-/etc/nginx/conf.d/cipherws.conf}"
 NGINX_SRC_REL="deploy/nginx/cipherws.conf"
-ENV_DOC_REL="docs/2026-10-10/前端双站点结构.md"
+ENV_DOC_REL="docs/项目架构文档.md"
 
 # -----------------------------------------------------------------------------
 # 命令行参数
@@ -91,7 +91,7 @@ CipherWS 前端一键更新
   train  云间列车    nginx 直接托管 dist，无进程
   note   池禾笔记    nginx 直接托管 dist，**无进程**；接口走主站那条隧道（/api/**）
 
-完整说明见 docs/2026-10-10/前端双站点结构.md
+完整说明见 docs/项目架构文档.md
 EOF
   exit 0
 }
