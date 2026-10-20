@@ -12,20 +12,17 @@
 -->
 <mapper namespace="org.example.cipherws.note.user.mapper.UserMapper">
 
-    <select id="countByUsername" resultType="long">
-        SELECT COUNT(*) FROM `note_user` WHERE username = #{username}
-    </select>
-
     <select id="countByEmail" resultType="long">
         SELECT COUNT(*) FROM `note_user` WHERE email = #{email}
     </select>
 
-    <!-- 登录：必须把 password 取出来做 BCrypt 比对 -->
-    <select id="findByUsername" resultType="NoteUser">
+    <!-- 登录：按邮箱查，必须把 password 取出来做 BCrypt 比对。
+         email 上有唯一键，所以最多一行。 -->
+    <select id="findByEmail" resultType="NoteUser">
         SELECT `id`, `username`, `password`, `role`, `enabled`, `email`,
                `nickname`, `avatar`, `bio`, `ai_quota`, `created_at`, `updated_at`
         FROM `note_user`
-        WHERE username = #{username}
+        WHERE `email` = #{email}
     </select>
 
     <select id="findById" resultType="NoteUser">

@@ -48,14 +48,16 @@ public class AccountController {
 
     /* ----------------------------- /auth/** ----------------------------- */
 
+    /** 注册第二步：邮箱 + 验证码 + 密码（+ 可选昵称）。验证码要先调 /auth/send-code */
     @PostMapping("/auth/register")
     public Result register(@RequestBody RegisterReq req) {
-        return Result.ok(userService.register(req.username(), req.password(), req.email()));
+        return Result.ok(userService.register(req.email(), req.code(), req.password(), req.nickname()));
     }
 
+    /** 登录：用邮箱作为账号 */
     @PostMapping("/auth/login")
     public Result login(@RequestBody LoginReq req) {
-        LoginRes res = userService.login(req.username(), req.password());
+        LoginRes res = userService.login(req.email(), req.password());
         return Result.ok(res);
     }
 
@@ -71,10 +73,17 @@ public class AccountController {
         return Result.ok(true);
     }
 
-    /** 找回密码：邮箱必须已注册 */
+    /**
+     * 发验证码（不需要登录）。
+     *
+     * purpose 决定校验规则：
+     *   register（注册）—— 邮箱必须**未**注册
+     *   reset（找回密码，缺省）—— 邮箱必须已注册
+     * 绑定邮箱不在这里，它需要登录态，走下面的 /user/email/code。
+     */
     @PostMapping("/auth/send-code")
-    public Result sendResetCode(@RequestBody SendCodeReq req) {
-        SendCodeRes res = userService.issueCode(null, req.email(), "reset");
+    public Result sendCode(@RequestBody SendCodeReq req) {
+        SendCodeRes res = userService.issueCode(null, req.email(), req.purpose());
         return Result.ok(res);
     }
 

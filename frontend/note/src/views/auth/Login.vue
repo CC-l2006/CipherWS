@@ -1,11 +1,15 @@
 <template>
-  <AuthLayout title="登录" subtitle="用账号密码进入你的私人笔记本。笔记默认私有，只有你自己能看到。">
+  <AuthLayout
+    title="登录"
+    subtitle="用邮箱和密码进入你的私人笔记本。笔记默认私有，只有你自己能看到。"
+  >
     <form class="form" @submit.prevent="onSubmit">
       <AppField
-        v-model="form.username"
-        label="账号"
-        placeholder="请输入账号"
-        :error="errors.username"
+        v-model="form.email"
+        label="邮箱"
+        type="email"
+        placeholder="注册时使用的邮箱"
+        :error="errors.email"
         required
         @submit="onSubmit"
       />
@@ -50,15 +54,19 @@ const router = useRouter()
 const userStore = useUserStore()
 const toast = useToastStore()
 
-const form = reactive({ username: '', password: '' })
-const errors = reactive({ username: '', password: '' })
+// 登录标识是邮箱，不再是账号名 —— 这样注册时不用抢用户名
+const form = reactive({ email: '', password: '' })
+const errors = reactive({ email: '', password: '' })
 const formError = ref('')
 const loading = ref(false)
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 function validate() {
-  errors.username = form.username.trim() ? '' : '请输入账号'
+  const email = form.email.trim()
+  errors.email = !email ? '请输入邮箱' : EMAIL_RE.test(email) ? '' : '邮箱格式不正确'
   errors.password = form.password ? '' : '请输入密码'
-  return !errors.username && !errors.password
+  return !errors.email && !errors.password
 }
 
 async function onSubmit() {
@@ -68,7 +76,10 @@ async function onSubmit() {
 
   loading.value = true
   try {
-    const user = await userStore.login({ username: form.username.trim(), password: form.password })
+    const user = await userStore.login({
+      email: form.email.trim(),
+      password: form.password
+    })
     toast.success(`欢迎回来，${user.nickname || user.username}`)
     // 回到被拦截的页面；管理员直接进后台更顺手
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
@@ -104,19 +115,5 @@ async function onSubmit() {
 
 .links__sep {
   color: var(--rule-strong);
-}
-
-.demo {
-  margin-top: var(--sp-3);
-  font-size: var(--fs-xs);
-  color: var(--ink-3);
-  line-height: 1.7;
-}
-
-.demo code {
-  font-family: var(--font-mono);
-  background: var(--paper-deep);
-  padding: 1px 5px;
-  border-radius: var(--r-sm);
 }
 </style>

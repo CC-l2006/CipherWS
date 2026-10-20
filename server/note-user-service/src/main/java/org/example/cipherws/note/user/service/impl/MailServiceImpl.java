@@ -46,9 +46,19 @@ public class MailServiceImpl implements MailService {
 
     @Override
     public void sendCode(String to, String code, String purpose) {
-        String subject = "reset".equals(purpose)
-                ? "【CipherWS 笔记】重置密码验证码"
-                : "【CipherWS 笔记】绑定邮箱验证码";
+        // 三种用途的措辞不同，别让用户在「注册」时收到一封「绑定邮箱」的邮件
+        String subject;
+        String lead;
+        if ("register".equals(purpose)) {
+            subject = "【池禾笔记】注册验证码";
+            lead = "你正在注册池禾笔记账号，验证邮箱归属。";
+        } else if ("reset".equals(purpose)) {
+            subject = "【池禾笔记】重置密码验证码";
+            lead = "你正在重置密码。";
+        } else {
+            subject = "【池禾笔记】绑定邮箱验证码";
+            lead = "你正在为账号绑定这个邮箱。";
+        }
         String text = """
                 %s
 
@@ -56,9 +66,7 @@ public class MailServiceImpl implements MailService {
                 有效期 5 分钟，请勿转发给他人。
 
                 如果不是你本人操作，忽略本邮件即可，你的账号不会有任何变化。
-                """.formatted(
-                "reset".equals(purpose) ? "你正在重置密码。" : "你正在为账号绑定这个邮箱。",
-                code);
+                """.formatted(lead, code);
 
         if (!isEnabled()) {
             // 本地开发/演示：不发信，把验证码写日志。

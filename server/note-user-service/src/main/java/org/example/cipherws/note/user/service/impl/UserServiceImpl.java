@@ -36,17 +36,13 @@ public class UserServiceImpl implements UserService {
     private static final Logger log = LoggerFactory.getLogger(UserServiceImpl.class);
 
     /**
-     * 账号允许的字符：中文、英文字母、数字、下划线。
+     * 邮箱格式校验。
      *
-     * 支持中文是明确需求，所以不能再用 ^[a-zA-Z0-9_]+$ 把汉字挡在外面。
-     * 范围取 CJK 基本汉字区（\u4e00-\u9fa5），覆盖 99% 的常用汉字；
-     * 生僻字（扩展 B 区以后）在补充平面，用 char 表示会是代理对，
-     * 需要 Pattern.UNICODE_CHARACTER_CLASS + \p{IsHan}，这里刻意不做，
-     * 只保证「常用中文账号能用」，避免把校验写得太玄。
+     * 2026-10-20 起**登录标识就是邮箱**（email 上有唯一键），所以这里只做
+     * 「看起来像个邮箱」的最低限度校验，真正的归属验证靠一次性验证码。
+     * 原来那套「账号 2-20 字符、允许中文」的规则已经废弃 —— 账号名现在由
+     * 邮箱前缀自动生成，用户不用填，也就不会撞名。
      */
-    private static final Pattern USERNAME_ALLOWED = Pattern.compile("^[\\u4e00-\\u9fa5A-Za-z0-9_]+$");
-    private static final int USERNAME_MIN = 2;
-    private static final int USERNAME_MAX = 20;
     private static final Pattern EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
 
     // 统一用 ISO 8601（2026-10-01T14:20:00）。
@@ -64,6 +60,7 @@ public class UserServiceImpl implements UserService {
     /** 同一个码最多试错 5 次 */
     private static final int MAX_CODE_ATTEMPTS = 5;
 
+    private static final String PURPOSE_REGISTER = "register";
     private static final String PURPOSE_RESET = "reset";
     private static final String PURPOSE_BIND = "bind";
 
@@ -122,29 +119,32 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public UserVo register(String username, String password, String email) {
-        String name = username == null ? "" : username.trim();
-        String mail = email == null ? "" : email.trim();
+    public UserVo register(String email, String code, String password, String nickname) {
+        String mail = normalizeEmail(email);
 
-        // 长度按「字符数」算，与建表时 VARCHAR(20) 的口径一致（MySQL 的
-        // VARCHAR(20) 指 20 个字符而不是 20 字节，一个汉字占 1 个字符）。
-        // 用 codePointCount 而不是 name.length()：后者会把代理对算成 2。
-        int nameLen = codePointLength(name);
-        if (nameLen < USERNAME_MIN || nameLen > USERNAME_MAX) {
-            throw new BusinessException("账号需为 2-20 个字符");
-        }
-        if (!USERNAME_ALLOWED.matcher(name).matches()) {
-            throw new BusinessException("账号只能包含中文、字母、数字或下划线");
+        if (!EMAIL.matcher(mail).matches()) {
+            throw new BusinessException("邮箱格式不正确");
         }
         if (password == null || password.length() < 6) {
             throw new BusinessException("密码至少 6 位");
         }
-        if (!EMAIL.matcher(mail).matches()) {
-            throw new BusinessException("邮箱格式不正确");
+        // 先查重：给出友好提示；真正的唯一性靠 uk_user_email 兜底
+        if (userMapper.countByEmail(mail) > 0) {
+            throw new BusinessException("该邮箱已注册，请直接登录");
         }
-        // 先查一次是为了给出友好提示；真正的唯一性靠数据库唯一索引兜底
-        if (userMapper.countByUsername(name) > 0) {
-            throw new BusinessException("该账号已被注册");
+
+        // 验证码必须与这个邮箱匹配、且用途是「注册」——
+        // 拿找回密码的码来注册会被 consumeCode 的用途校验拦下
+        consumeCode(mail, PURPOSE_REGISTER, code);
+
+        // 账号名由邮箱前缀生成，用户压根不用填，也就不会有「用户名被占用」
+        String name = deriveUsername(mail);
+        String nick = nickname == null ? "" : nickname.trim();
+        if (nick.isEmpty()) {
+            nick = name;
+        }
+        if (codePointLength(nick) > 20) {
+            throw new BusinessException("昵称最多 20 个字符");
         }
 
         NoteUser user = new NoteUser();
@@ -153,8 +153,7 @@ public class UserServiceImpl implements UserService {
         user.setRole("user");
         user.setEnabled(true);
         user.setEmail(mail);
-        // 没填昵称时先用账号名占位，用户可以在资料页改
-        user.setNickname(name);
+        user.setNickname(nick);
         user.setAvatar("");
         user.setBio("");
         user.setAiQuota(INITIAL_QUOTA);
@@ -162,20 +161,23 @@ public class UserServiceImpl implements UserService {
         try {
             userMapper.insert(user);
         } catch (DuplicateKeyException e) {
-            // 并发下两个人同时注册同一个账号时，唯一索引会在这里兜住
-            throw new BusinessException("该账号已被注册");
+            // 两个人同时拿同一个邮箱注册时，uk_user_email 在这里兜住
+            throw new BusinessException("该邮箱已注册，请直接登录");
         }
         // insert 已经把自增 id 回填进实体，但创建时间等列还是空，统一回查一次
         return toVo(userMapper.findById(user.getId()));
     }
 
     @Override
-    public LoginRes login(String username, String password) {
-        String name = username == null ? "" : username.trim();
-        NoteUser user = userMapper.findByUsername(name);
+    public LoginRes login(String email, String password) {
+        String mail = normalizeEmail(email);
+        if (mail.isEmpty()) {
+            throw new BusinessException("请输入邮箱");
+        }
+        NoteUser user = userMapper.findByEmail(mail);
         if (user == null) {
-            // 不区分「账号不存在」与「密码错误」，避免被用来枚举账号
-            throw new BusinessException("账号或密码不正确");
+            // 不区分「邮箱不存在」与「密码错误」，避免被用来枚举账号
+            throw new BusinessException("邮箱或密码不正确");
         }
 
         // 账号被禁用时必须给出明确原因（需求 4.2.3），否则用户永远不知道发生了什么
@@ -183,27 +185,33 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("该账号已被禁用，请联系管理员");
         }
         if (!passwordEncoder.matches(password == null ? "" : password, user.getPassword())) {
-            throw new BusinessException("账号或密码不正确");
+            throw new BusinessException("邮箱或密码不正确");
         }
 
-        String token = JwtUtil.sign(user.getId(), user.getUsername(), user.getRole(),
+        // 令牌的 sub 放邮箱：它是登录标识，将来改昵称/显示名都不会影响身份
+        String token = JwtUtil.sign(user.getId(), user.getEmail(), user.getRole(),
                 jwtSecret, jwtTtlSeconds);
 
-        writeUserLog(user.getId(), "登录", "账号登录成功");
+        writeUserLog(user.getId(), "登录", "邮箱登录成功");
         return new LoginRes(token, profile(user.getId()));
     }
 
     @Override
     public SendCodeRes issueCode(Long currentUserId, String email, String purpose) {
-        String mail = email == null ? "" : email.trim().toLowerCase();
-        String use = PURPOSE_BIND.equalsIgnoreCase(purpose) ? PURPOSE_BIND : PURPOSE_RESET;
+        String mail = normalizeEmail(email);
+        String use = resolvePurpose(purpose);
 
         if (!EMAIL.matcher(mail).matches()) {
             throw new BusinessException("邮箱格式不正确");
         }
 
-        if (PURPOSE_RESET.equals(use)) {
-            // 找回密码：邮箱必须是某个已有账号的绑定邮箱
+        if (PURPOSE_REGISTER.equals(use)) {
+            // 注册：这个邮箱还不能被注册过
+            if (userMapper.countByEmail(mail) > 0) {
+                throw new BusinessException("该邮箱已注册，请直接登录");
+            }
+        } else if (PURPOSE_RESET.equals(use)) {
+            // 找回密码：邮箱必须是某个已有账号的登录邮箱
             if (userMapper.countByEmail(mail) == 0) {
                 throw new BusinessException("该邮箱未注册");
             }
@@ -366,6 +374,56 @@ public class UserServiceImpl implements UserService {
     /* ------------------------------ 内部工具 ------------------------------ */
 
     /**
+     * 把前端传来的 purpose 归一化。
+     * 认不出来的一律按 reset 处理（兼容老调用方只传 email 的情况）。
+     */
+    private static String resolvePurpose(String purpose) {
+        if (purpose == null) {
+            return PURPOSE_RESET;
+        }
+        String p = purpose.trim().toLowerCase();
+        if (PURPOSE_REGISTER.equals(p)) {
+            return PURPOSE_REGISTER;
+        }
+        if (PURPOSE_BIND.equals(p)) {
+            return PURPOSE_BIND;
+        }
+        return PURPOSE_RESET;
+    }
+
+    /**
+     * 邮箱统一转小写再比较/入库。
+     *
+     * 不这么做的话 `A@x.com` 与 `a@x.com` 会被当成两个账号：
+     * 唯一键在 utf8mb4_0900_ai_ci 下虽然是大小写不敏感的，但代码里
+     * equals 之类的判断不是，统一在入口处规范化最省事。
+     */
+    private static String normalizeEmail(String email) {
+        return email == null ? "" : email.trim().toLowerCase();
+    }
+
+    /**
+     * 由邮箱前缀生成显示名（username）。
+     *
+     * username 现在只是「显示名」，没有唯一约束，所以撞了也没关系 ——
+     * 这正是把登录标识换成邮箱的目的：注册永远不会因为重名失败。
+     */
+    private static String deriveUsername(String mail) {
+        int at = mail.indexOf('@');
+        String local = at > 0 ? mail.substring(0, at) : mail;
+        // 只留字母数字下划线：VARCHAR(20) 且不再允许中文/特殊字符，
+        // 中文邮箱前缀（极少见）会退化成 "user"
+        String cleaned = local.replaceAll("[^A-Za-z0-9_]", "");
+        if (cleaned.isEmpty()) {
+            cleaned = "user";
+        }
+        if (cleaned.length() > 20) {
+            cleaned = cleaned.substring(0, 20);
+        }
+        return cleaned;
+    }
+
+    /**
      * 校验并消费一个验证码。
      *
      * 「消费」是指校验通过后立刻从内存里删掉 —— 同一个码不能用第二次，
@@ -381,7 +439,7 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("验证码已过期，请重新获取");
         }
         if (!purpose.equals(entry.purpose)) {
-            // 找回密码的码不能拿去绑邮箱，反之亦然
+            // 注册 / 找回密码 / 绑定邮箱三种码互不通用，防止拿 A 用途的码做 B 事
             throw new BusinessException("验证码用途不匹配，请重新获取");
         }
         if (entry.attempts >= MAX_CODE_ATTEMPTS) {

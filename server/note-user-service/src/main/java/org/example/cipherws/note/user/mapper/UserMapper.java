@@ -12,12 +12,13 @@ import org.example.cipherws.note.common.entity.NoteUser;
  */
 public interface UserMapper {
 
-    Long countByUsername(@Param("username") String username);
-
     Long countByEmail(@Param("email") String email);
 
-    /** 登录用：要拿到 password 摘要才能比对，所以这个方法**会**带出密码字段 */
-    NoteUser findByUsername(@Param("username") String username);
+    /**
+     * 登录用：按邮箱查，**会**带出 password 摘要才能比对。
+     * 2026-10-20 起登录标识改成了邮箱（email 上有唯一键）。
+     */
+    NoteUser findByEmail(@Param("email") String email);
 
     /** 查资料用 */
     NoteUser findById(@Param("id") long id);

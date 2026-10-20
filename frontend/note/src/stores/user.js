@@ -34,15 +34,17 @@ export const useUserStore = defineStore('user', () => {
     userInfo.value = info || null
   }
 
-  async function login({ username, password }) {
-    const { data } = await authApi.login({ username, password })
+  /** 登录：邮箱 + 密码（2026-10-20 起账号标识是邮箱，不再是用户名） */
+  async function login({ email, password }) {
+    const { data } = await authApi.login({ email, password })
     setToken(data.token)
     setUserInfo(data.user)
     return data.user
   }
 
-  async function register({ username, password, email }) {
-    const { data } = await authApi.register({ username, password, email })
+  /** 注册：邮箱 + 验证码 + 密码（+ 可选昵称），账号名由后端生成 */
+  async function register({ email, code, password, nickname }) {
+    const { data } = await authApi.register({ email, code, password, nickname })
     return data
   }
 

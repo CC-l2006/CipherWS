@@ -11,7 +11,14 @@ export const authApi = {
   register: (body) => request('/auth/register', { method: 'POST', body }),
   login: (body) => request('/auth/login', { method: 'POST', body }),
   logout: () => request('/auth/logout', { method: 'POST' }),
-  sendCode: (email) => request('/auth/send-code', { method: 'POST', body: { email } }),
+  /**
+   * 发验证码。purpose 决定后端怎么校验这个邮箱：
+   *   'register' 注册 —— 邮箱必须**未**注册
+   *   'reset'    找回密码（缺省）—— 邮箱必须已注册
+   * 绑定邮箱不走这里（要登录态），用 userApi.sendBindCode。
+   */
+  sendCode: (email, purpose = 'reset') =>
+    request('/auth/send-code', { method: 'POST', body: { email, purpose } }),
   resetPassword: (body) => request('/auth/reset-password', { method: 'POST', body })
 }
 

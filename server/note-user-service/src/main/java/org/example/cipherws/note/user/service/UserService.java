@@ -13,17 +13,22 @@ import org.springframework.web.multipart.MultipartFile;
  */
 public interface UserService {
 
-    /** 注册普通用户（需求 4.1.1：账号唯一、密码加密存储） */
-    UserVo register(String username, String password, String email);
+    /**
+     * 注册（邮箱验证码制）。
+     *
+     * 流程：先 POST /auth/send-code（purpose=register）拿到码，再调这里。
+     * 账号名不用填，由邮箱前缀自动生成 —— 这样不会再有「用户名被占用」。
+     */
+    UserVo register(String email, String code, String password, String nickname);
 
-    /** 登录（需求 4.1.2：校验身份、区分普通用户与管理员） */
-    LoginRes login(String username, String password);
+    /** 登录：用邮箱作为账号（email 上有唯一键） */
+    LoginRes login(String email, String password);
 
     /**
      * 发验证码。
      *
-     * @param currentUserId 当前登录用户；找回密码时是 null（那时还没登录）
-     * @param purpose       reset（找回密码）/ bind（绑定邮箱）
+     * @param currentUserId 当前登录用户；注册与找回密码时是 null（那时还没登录）
+     * @param purpose       register（注册）/ reset（找回密码）/ bind（绑定邮箱）
      */
     SendCodeRes issueCode(Long currentUserId, String email, String purpose);
 

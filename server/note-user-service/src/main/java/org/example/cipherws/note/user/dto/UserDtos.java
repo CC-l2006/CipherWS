@@ -11,12 +11,22 @@ public final class UserDtos {
     private UserDtos() {
     }
 
-    /** 注册：账号 / 密码 / 邮箱 */
-    public record RegisterReq(String username, String password, String email) {
+    /**
+     * 注册：邮箱 + 验证码 + 密码 +（可选）昵称。
+     *
+     * 不再有 username —— 登录用邮箱，账号名由邮箱前缀自动生成，用户不用填，
+     * 也就不会出现「用户名被占用」这种注册失败。
+     *
+     * @param email    要注册的邮箱，必须先用它收一次验证码（purpose=register）
+     * @param code     6 位验证码
+     * @param password 密码，≥6 位
+     * @param nickname 昵称，可空（空则用邮箱前缀）
+     */
+    public record RegisterReq(String email, String code, String password, String nickname) {
     }
 
-    /** 登录 */
-    public record LoginReq(String username, String password) {
+    /** 登录：邮箱 + 密码 */
+    public record LoginReq(String email, String password) {
     }
 
     /** 登录成功返回：令牌 + 用户信息 */

@@ -40,14 +40,19 @@ SET NAMES utf8mb4;
 -- 1. note_user 用户表
 --    需求 6.2.1：密码必须不可逆加密存储，password 列存 BCrypt 摘要（60 字符），
 --    绝不放明文。这里给 100 长度给未来换 Argon2 留余量。
+--
+--    ⚠️ 2026-10-20 起：**登录改用邮箱**，email 是全库唯一标识；
+--       username 降级为「显示名」，注册时由邮箱前缀自动生成，不再要求唯一，
+--       用户也不用填 —— 这样彻底避开「用户名被占用」导致的注册失败。
+--       存量库用 server/sql/note-migration-2026-10-20.sql 迁移。
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `note_user` (
     `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '用户 ID',
-    `username`    VARCHAR(20)  NOT NULL COMMENT '账号，2-20 个字符，可用中文/字母/数字/下划线',
+    `username`    VARCHAR(20)  NOT NULL COMMENT '显示名，由邮箱前缀生成，不要求唯一',
     `password`    VARCHAR(100) NOT NULL COMMENT 'BCrypt 密码摘要，禁止明文',
     `role`        VARCHAR(16)  NOT NULL DEFAULT 'user' COMMENT '角色：user / admin',
     `enabled`     TINYINT(1)   NOT NULL DEFAULT 1 COMMENT '是否启用，0 禁用后不能登录',
-    `email`       VARCHAR(120) NOT NULL DEFAULT '' COMMENT '绑定邮箱，用于找回密码',
+    `email`       VARCHAR(120) NOT NULL COMMENT '登录账号，全库唯一',
     `nickname`    VARCHAR(32)  NOT NULL DEFAULT '' COMMENT '昵称',
     `avatar`      VARCHAR(255) NOT NULL DEFAULT '' COMMENT '头像地址',
     `bio`         VARCHAR(255) NOT NULL DEFAULT '' COMMENT '个人简介',
@@ -55,8 +60,8 @@ CREATE TABLE IF NOT EXISTS `note_user` (
     `created_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at`  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
-    UNIQUE KEY `uk_user_username` (`username`),
-    KEY `idx_user_email` (`email`)
+    UNIQUE KEY `uk_user_email` (`email`),
+    KEY `idx_user_username` (`username`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '用户表';
 
 -- -----------------------------------------------------------------------------
