@@ -1,5 +1,6 @@
 package org.example.cipherws.note.user.service.impl;
 
+import jakarta.mail.AuthenticationFailedException;
 import org.example.cipherws.note.common.entity.NoteUser;
 import org.example.cipherws.note.common.exception.BusinessException;
 import org.example.cipherws.note.common.security.JwtUtil;
@@ -18,6 +19,9 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.net.ConnectException;
+import java.net.SocketTimeoutException;
+import java.net.UnknownHostException;
 import java.security.SecureRandom;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
@@ -250,8 +254,26 @@ public class UserServiceImpl implements UserService {
             // 而且 60 秒频控还卡着不让重试，人会以为是服务坏了。
             codes.remove(mail);
             lastSentAt.remove(mail);
+
+            // 把「为什么发不出去」区分开。
+            // 之前所有失败都报同一句「请检查邮箱配置」，实际最常见的是
+            // SMTP 535 认证被拒（授权码在邮箱后台重新生成后，旧码立即作废），
+            // 光看那句提示根本判断不出来，只能翻日志。
+            if (isMailAuthFailure(e)) {
+                log.error("验证码邮件发送失败：SMTP 认证被拒（535 Login fail）to={} purpose={}。"
+                        + "常见原因：授权码已失效（重新生成后旧码作废）、该邮箱未开启 SMTP 服务、"
+                        + "或账号被临时限制登录。请到邮箱后台重新生成授权码后更新 deploy/mail.env.local。",
+                        mail, use, e);
+                throw new BusinessException("邮件服务暂不可用：服务器邮箱授权码已失效，请联系管理员");
+            }
+            if (isMailConnectFailure(e)) {
+                log.error("验证码邮件发送失败：连不上 SMTP 服务器 to={} purpose={}。"
+                        + "检查 SPRING_MAIL_HOST/PORT（465 走 SSL，587 走 STARTTLS）以及本机出网限制。",
+                        mail, use, e);
+                throw new BusinessException("邮件服务暂不可用：连不上邮件服务器，请稍后重试");
+            }
             log.error("验证码邮件发送失败 to={} purpose={}", mail, use, e);
-            throw new BusinessException("验证码邮件发送失败，请检查邮箱配置或稍后重试");
+            throw new BusinessException("验证码邮件发送失败，请稍后重试");
         }
 
         boolean devMode = !mailService.isEnabled();
@@ -421,6 +443,40 @@ public class UserServiceImpl implements UserService {
             cleaned = cleaned.substring(0, 20);
         }
         return cleaned;
+    }
+
+    /**
+     * SMTP 认证被拒（535 / AuthenticationFailedException）。
+     *
+     * 沿 cause 链找，因为 JavaMail 会把真正的 AuthenticationFailedException
+     * 包在 MailAuthenticationException 里，只看最外层判断不出来。
+     */
+    private static boolean isMailAuthFailure(Throwable e) {
+        for (Throwable t = e; t != null && t.getCause() != t; t = t.getCause()) {
+            if (t instanceof AuthenticationFailedException) {
+                return true;
+            }
+            String m = t.getMessage();
+            if (m != null && (m.contains("535") || m.contains("Login fail"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 连不上邮件服务器（DNS / 拒绝连接 / 超时），与「账号密码不对」是两类问题 */
+    private static boolean isMailConnectFailure(Throwable e) {
+        for (Throwable t = e; t != null && t.getCause() != t; t = t.getCause()) {
+            if (t instanceof UnknownHostException || t instanceof ConnectException
+                    || t instanceof SocketTimeoutException) {
+                return true;
+            }
+            String m = t.getMessage();
+            if (m != null && (m.contains("Connection refused") || m.contains("timed out"))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
