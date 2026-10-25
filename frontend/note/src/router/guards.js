@@ -8,7 +8,8 @@ const APP_NAME = '池禾笔记'
 const WHITE_LIST = ['/login', '/register', '/forgot-password']
 
 router.beforeEach(async (to) => {
-  document.title = to.meta.title ? `${to.meta.title} · ${APP_NAME}` : APP_NAME
+  // 浏览器标签页只显示站点名，不再拼页面标题前缀
+  document.title = APP_NAME
 
   const userStore = useUserStore()
   const toast = useToastStore()
