@@ -43,19 +43,27 @@ public final class UserDtos {
     public record ProfileReq(String nickname, String bio, String avatar) {
     }
 
-    /** 修改密码 */
-    public record PasswordReq(String oldPassword, String newPassword) {
+    /**
+     * 修改密码：旧密码 + 新密码 + 邮箱验证码。
+     *
+     * 为什么要旧密码：万一有人临时用着你的电脑（或偷到会话），
+     * 光有邮箱验证码就能改密码等于把账号送出去，加一道旧密码成本很低。
+     */
+    public record PasswordReq(String oldPassword, String newPassword, String code) {
     }
 
-    /** 找回密码：邮箱 + 验证码 + 新密码 */
+    /** 找回密码：邮箱 + 验证码 + 新密码（前端会要求输两次，与这里比对） */
     public record ResetPasswordReq(String email, String code, String password) {
     }
 
     /**
      * 发送验证码。
      *
-     * @param purpose reset = 找回密码（邮箱必须已注册）；
-     *                bind  = 绑定邮箱（邮箱不能被别的账号占用）。
+     * @param purpose register = 注册（邮箱必须**未**注册）
+     *                reset    = 找回密码（邮箱必须已注册）
+     *                bind_old = 更换邮箱第 1 步，验证**当前**邮箱（需要登录）
+     *                bind_new = 更换邮箱第 2 步，验证**新**邮箱（需要登录）
+     *                password = 修改密码，验证当前邮箱（需要登录）
      *                null 按 reset 处理，兼容老调用方。
      */
     public record SendCodeReq(String email, String purpose) {
@@ -71,8 +79,12 @@ public final class UserDtos {
     public record SendCodeRes(String hint, String code, int cooldown) {
     }
 
-    /** 绑定邮箱：新邮箱 + 验证码 */
+    /** 更换绑定邮箱第 2 步：新邮箱 + 新邮箱收到的验证码 */
     public record BindEmailReq(String email, String code) {
+    }
+
+    /** 只带一个验证码的请求（验证旧邮箱、改密码前置校验等） */
+    public record CodeOnlyReq(String code) {
     }
 
     /**

@@ -45,6 +45,21 @@
           <span class="rail__user-name">{{ userStore.displayName }}</span>
         </RouterLink>
 
+        <!-- 设置入口：左下角、退出登录上方。账号与安全相关操作都在那一页 -->
+        <RouterLink
+          to="/settings"
+          class="rail__link rail__settings"
+          :class="{ 'is-active': route.path === '/settings' }"
+        >
+          <span class="rail__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.14.36.4.66.74.85H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </span>
+          <span>设置</span>
+        </RouterLink>
+
         <button class="rail__logout" type="button" @click="onLogout">退出登录</button>
       </div>
     </aside>
@@ -302,6 +317,23 @@ onMounted(async () => {
   font-size: var(--fs-xs);
   color: var(--ink-3);
   cursor: pointer;
+}
+
+/* 设置入口在脚部，比主导航低一级：字号小一点、默认灰一些 */
+.rail__settings {
+  padding-top: 4px;
+  padding-bottom: 4px;
+  font-size: var(--fs-xs);
+  color: var(--ink-2);
+}
+
+.rail__settings.is-active {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+}
+
+.rail__settings.is-active::before {
+  display: none;
 }
 
 .rail__logout:hover {

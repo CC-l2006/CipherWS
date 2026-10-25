@@ -4,6 +4,7 @@ import org.example.cipherws.note.common.exception.BusinessException;
 import org.example.cipherws.note.common.result.Result;
 import org.example.cipherws.note.common.security.Auth;
 import org.example.cipherws.note.user.dto.UserDtos.BindEmailReq;
+import org.example.cipherws.note.user.dto.UserDtos.CodeOnlyReq;
 import org.example.cipherws.note.user.dto.UserDtos.LoginReq;
 import org.example.cipherws.note.user.dto.UserDtos.LoginRes;
 import org.example.cipherws.note.user.dto.UserDtos.PasswordReq;
@@ -110,16 +111,33 @@ public class AccountController {
         return Result.ok(vo);
     }
 
-    /** 绑定邮箱第一步：给**新邮箱**发验证码（需要登录） */
+    /**
+     * 更换绑定邮箱第 1 步：给**当前邮箱**发验证码。
+     * 请求体不需要传 email —— 服务端直接取库里的当前邮箱，避免被伪造。
+     */
     @PostMapping("/user/email/code")
-    public Result sendBindCode(
+    public Result sendEmailCode(
             @RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId,
             @RequestBody SendCodeReq req) {
-        SendCodeRes res = userService.issueCode(requireUserId(userId), req.email(), "bind");
+        // purpose 只认 bind_old / bind_new；不传时按「给新邮箱发」处理（兼容旧前端）
+        String purpose = req.purpose() == null ? "bind_new" : req.purpose();
+        SendCodeRes res = userService.issueCode(requireUserId(userId), req.email(), purpose);
         return Result.ok(res);
     }
 
-    /** 绑定邮箱第二步：带上收到的验证码换绑 */
+    /**
+     * 更换绑定邮箱第 1 步的校验：确认旧邮箱的验证码。
+     * 通过后 10 分钟内才能走第 2 步，这是「先验旧、再验新」的关键一环。
+     */
+    @PostMapping("/user/email/verify-old")
+    public Result verifyOldEmail(
+            @RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId,
+            @RequestBody CodeOnlyReq req) {
+        userService.verifyOldEmail(requireUserId(userId), req.code());
+        return Result.ok(true);
+    }
+
+    /** 更换绑定邮箱第 2 步：新邮箱 + 新邮箱收到的验证码 */
     @PutMapping("/user/email")
     public Result bindEmail(
             @RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId,
@@ -140,11 +158,21 @@ public class AccountController {
         return Result.ok(vo);
     }
 
+    /** 修改密码第一步：给当前邮箱发验证码（需要登录） */
+    @PostMapping("/user/password/code")
+    public Result sendPasswordCode(
+            @RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId) {
+        SendCodeRes res = userService.issueCode(requireUserId(userId), null, "password");
+        return Result.ok(res);
+    }
+
+    /** 修改密码第二步：旧密码 + 新密码 + 邮箱验证码 */
     @PutMapping("/user/password")
     public Result changePassword(
             @RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId,
             @RequestBody PasswordReq req) {
-        userService.changePassword(requireUserId(userId), req.oldPassword(), req.newPassword());
+        userService.changePassword(
+                requireUserId(userId), req.oldPassword(), req.newPassword(), req.code());
         return Result.ok(true);
     }
 

@@ -41,6 +41,15 @@
         required
         @submit="onSubmit"
       />
+      <AppField
+        v-model="form.confirm"
+        label="确认新密码"
+        type="password"
+        placeholder="再输入一次新密码"
+        :error="errors.confirm"
+        required
+        @submit="onSubmit"
+      />
 
       <p v-if="hint" class="hint">{{ hint }}</p>
       <p v-if="formError" class="form__error" role="alert">{{ formError }}</p>
@@ -68,8 +77,8 @@ import { useToastStore } from '@/stores/toast.js'
 const router = useRouter()
 const toast = useToastStore()
 
-const form = reactive({ email: '', code: '', password: '' })
-const errors = reactive({ email: '', code: '', password: '' })
+const form = reactive({ email: '', code: '', password: '', confirm: '' })
+const errors = reactive({ email: '', code: '', password: '', confirm: '' })
 const formError = ref('')
 const hint = ref('')
 const loading = ref(false)
@@ -81,6 +90,8 @@ function validate() {
   errors.email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim()) ? '' : '邮箱格式不正确'
   errors.code = /^\d{6}$/.test(form.code.trim()) ? '' : '请输入 6 位数字验证码'
   errors.password = form.password.length >= 6 ? '' : '新密码至少 6 位'
+  // 密码输两次：避免手滑打错，重置完就再也登不进去了
+  errors.confirm = form.confirm === form.password ? '' : '两次输入的新密码不一致'
   return Object.values(errors).every((v) => !v)
 }
 

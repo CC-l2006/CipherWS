@@ -28,7 +28,10 @@ public interface UserService {
      * 发验证码。
      *
      * @param currentUserId 当前登录用户；注册与找回密码时是 null（那时还没登录）
-     * @param purpose       register（注册）/ reset（找回密码）/ bind（绑定邮箱）
+     * @param purpose       register（注册）/ reset（找回密码）/
+     *                      bind_old（更换邮箱第 1 步：验证当前邮箱）/
+     *                      bind_new（更换邮箱第 2 步：验证新邮箱）/
+     *                      password（修改密码：验证当前邮箱）
      */
     SendCodeRes issueCode(Long currentUserId, String email, String purpose);
 
@@ -44,9 +47,20 @@ public interface UserService {
     /** 上传头像：校验图片 → 落盘 → 更新用户 → 顺带删除旧文件 */
     UserVo uploadAvatar(long userId, MultipartFile file);
 
-    /** 绑定/更换邮箱：必须先用该邮箱收一次验证码 */
+    /**
+     * 更换绑定邮箱第 1 步：校验发到**当前邮箱**的验证码。
+     *
+     * 通过后会记一个短时有效的「旧邮箱已验证」标记（10 分钟），
+     * 第 2 步必须带着这个标记才能改，防止只拿到新邮箱就换绑。
+     */
+    void verifyOldEmail(long userId, String code);
+
+    /**
+     * 更换绑定邮箱第 2 步：验证**新邮箱**的验证码并写库。
+     * 前置条件：最近 10 分钟内通过过 verifyOldEmail。
+     */
     UserVo bindEmail(long userId, String email, String code);
 
-    /** 改密码（需求 4.2.2：必须先验证旧密码） */
-    void changePassword(long userId, String oldPassword, String newPassword);
+    /** 改密码：必须提供旧密码 + 发到当前邮箱的验证码 */
+    void changePassword(long userId, String oldPassword, String newPassword, String code);
 }

@@ -3,8 +3,10 @@
     <div class="page-title">
       <h1>个人资料</h1>
     </div>
+    <p class="page-sub">这些信息会显示在你自己的页面上。邮箱与密码属于账号安全，在「设置」里改。</p>
 
-    <div class="cols">
+    <!-- 单列自上而下，不再左右并排 -->
+    <div class="stack">
       <!-- 基本资料 -->
       <section class="card sheet">
         <h2 class="card__title">基本资料</h2>
@@ -61,104 +63,43 @@
         </form>
       </section>
 
-      <div class="side">
-        <!-- 绑定邮箱：换绑必须走验证码 -->
-        <section class="card sheet">
-          <h2 class="card__title">绑定邮箱</h2>
-
-          <p class="email">
-            <span :class="{ 'email__empty': !currentEmail }">{{ currentEmail || '尚未绑定' }}</span>
-            <button v-if="!bindOpen" class="link" type="button" @click="openBind">
-              {{ currentEmail ? '修改' : '去绑定' }}
-            </button>
-            <button v-else class="link" type="button" @click="closeBind">取消</button>
+      <!-- AI 额度：单列时用「左说明 + 右数字」的一行，比巨大的数字更耐看 -->
+      <section class="card sheet">
+        <h2 class="card__title">AI 额度</h2>
+        <div class="stat">
+          <div class="stat__text">
+            <p class="stat__label">剩余 AI 总结次数</p>
+            <p class="card__hint">每调用一次 AI 总结消耗 1 次。额度用完后需要联系管理员分配。</p>
+          </div>
+          <p class="stat__value" :class="{ 'is-low': userStore.aiQuota <= 2 }">
+            {{ userStore.aiQuota }}<span class="stat__unit">次</span>
           </p>
-          <p class="card__hint">
-            邮箱用于找回密码。修改时会给<strong>新邮箱</strong>发一个验证码，验证通过才会生效 ——
-            这样才能保证这个邮箱确实是你的。
-          </p>
+        </div>
+      </section>
 
-          <form v-if="bindOpen" class="form" @submit.prevent="confirmBind">
-            <AppField
-              v-model="bind.email"
-              label="新邮箱"
-              type="email"
-              placeholder="要绑定的邮箱地址"
-              :error="bindErrors.email"
-            />
-            <div class="code-row">
-              <AppField
-                v-model="bind.code"
-                label="验证码"
-                :maxlength="6"
-                placeholder="6 位数字"
-                :error="bindErrors.code"
-              />
-              <AppButton
-                variant="ghost"
-                :disabled="countdown > 0 || sendingCode"
-                :loading="sendingCode"
-                @click="sendBindCode"
-              >
-                {{ countdown > 0 ? `${countdown}s` : '发送验证码' }}
-              </AppButton>
-            </div>
-            <p v-if="codeHint" class="card__hint card__hint--ok">{{ codeHint }}</p>
-            <div class="form__actions">
-              <AppButton type="submit" variant="primary" :loading="binding">确认绑定</AppButton>
-            </div>
-          </form>
-        </section>
-
-        <!-- AI 额度 -->
-        <section class="card sheet">
-          <h2 class="card__title">AI 额度</h2>
-          <p class="quota" :class="{ 'is-low': userStore.aiQuota <= 2 }">
-            {{ userStore.aiQuota }}<span class="quota__unit">次</span>
-          </p>
-          <p class="card__hint">
-            每调用一次 AI 总结消耗 1 次额度。额度用完后需要联系管理员分配。
-          </p>
-        </section>
-
-        <!-- 修改密码 -->
-        <section class="card sheet">
-          <h2 class="card__title">修改密码</h2>
-          <form class="form" @submit.prevent="savePassword">
-            <AppField
-              v-model="password.oldPassword"
-              label="原密码"
-              type="password"
-              :error="passwordErrors.oldPassword"
-              required
-            />
-            <AppField
-              v-model="password.newPassword"
-              label="新密码"
-              type="password"
-              hint="至少 6 位"
-              :error="passwordErrors.newPassword"
-              required
-            />
-            <AppField
-              v-model="password.confirm"
-              label="确认新密码"
-              type="password"
-              :error="passwordErrors.confirm"
-              required
-            />
-            <div class="form__actions">
-              <AppButton type="submit" variant="primary" :loading="savingPassword">更新密码</AppButton>
-            </div>
-          </form>
-        </section>
-      </div>
+      <!-- 账号与安全：真正的操作都在设置页 -->
+      <section class="card sheet">
+        <h2 class="card__title">账号与安全</h2>
+        <p class="card__hint">
+          登录邮箱、更换绑定邮箱、修改密码都在设置页 —— 这些操作要用邮箱验证码，所以单独放一页。
+        </p>
+        <dl class="meta">
+          <dt>登录邮箱</dt>
+          <dd class="meta__mono">{{ userStore.userInfo?.email || '尚未绑定' }}</dd>
+          <dt>登录密码</dt>
+          <dd>已设置（••••••）</dd>
+        </dl>
+        <div class="form__actions">
+          <RouterLink to="/settings" class="btn-link">前往设置</RouterLink>
+        </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onUnmounted, reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import AppField from '@/components/AppField.vue'
 import AppButton from '@/components/AppButton.vue'
 import { userApi } from '@/api/index.js'
@@ -170,7 +111,6 @@ const toast = useToastStore()
 
 const initial = computed(() => (userStore.displayName || '？').slice(0, 1))
 const avatarUrl = computed(() => userStore.userInfo?.avatar || '')
-const currentEmail = computed(() => userStore.userInfo?.email || '')
 
 /** 按「字符」计数：中文昵称 3 个字就是 3，不是 9 个字节 */
 function count(value) {
@@ -244,135 +184,26 @@ async function saveProfile() {
     savingProfile.value = false
   }
 }
-
-/* ---------- 绑定邮箱 ---------- */
-const bindOpen = ref(false)
-const bind = reactive({ email: '', code: '' })
-const bindErrors = reactive({ email: '', code: '' })
-const sendingCode = ref(false)
-const binding = ref(false)
-const codeHint = ref('')
-const countdown = ref(0)
-let timer = null
-
-function openBind() {
-  bindOpen.value = true
-  bind.email = ''
-  bind.code = ''
-  bindErrors.email = ''
-  bindErrors.code = ''
-  codeHint.value = ''
-}
-
-function closeBind() {
-  bindOpen.value = false
-}
-
-function startCountdown(seconds) {
-  countdown.value = seconds
-  clearInterval(timer)
-  timer = setInterval(() => {
-    countdown.value -= 1
-    if (countdown.value <= 0) clearInterval(timer)
-  }, 1000)
-}
-
-onUnmounted(() => clearInterval(timer))
-
-async function sendBindCode() {
-  const email = bind.email.trim()
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    bindErrors.email = '邮箱格式不正确'
-    return
-  }
-  bindErrors.email = ''
-
-  sendingCode.value = true
-  try {
-    const { data } = await userApi.sendBindCode(email)
-    codeHint.value = data?.hint || '验证码已发送'
-    // 本地没配 SMTP 时后端会把码直接返回，直接填进输入框省一次手输
-    if (data?.code) {
-      bind.code = data.code
-      codeHint.value = `${data.hint}（已自动填入）`
-    }
-    startCountdown(data?.cooldown || 60)
-  } catch (err) {
-    bindErrors.email = err.message
-  } finally {
-    sendingCode.value = false
-  }
-}
-
-async function confirmBind() {
-  const email = bind.email.trim()
-  const code = bind.code.trim()
-  bindErrors.email = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? '' : '邮箱格式不正确'
-  bindErrors.code = /^\d{6}$/.test(code) ? '' : '请输入 6 位数字验证码'
-  if (bindErrors.email || bindErrors.code) return
-
-  binding.value = true
-  try {
-    const { data } = await userApi.bindEmail({ email, code })
-    userStore.patchUserInfo(data)
-    toast.success('邮箱已绑定')
-    bindOpen.value = false
-    clearInterval(timer)
-    countdown.value = 0
-  } catch (err) {
-    bindErrors.code = err.message
-  } finally {
-    binding.value = false
-  }
-}
-
-/* ---------- 密码 ---------- */
-const password = reactive({ oldPassword: '', newPassword: '', confirm: '' })
-const passwordErrors = reactive({ oldPassword: '', newPassword: '', confirm: '' })
-const savingPassword = ref(false)
-
-async function savePassword() {
-  passwordErrors.oldPassword = password.oldPassword ? '' : '请输入原密码'
-  passwordErrors.newPassword = password.newPassword.length >= 6 ? '' : '新密码至少 6 位'
-  passwordErrors.confirm = password.confirm === password.newPassword ? '' : '两次输入不一致'
-  if (Object.values(passwordErrors).some(Boolean)) return
-
-  savingPassword.value = true
-  try {
-    await userApi.changePassword({
-      oldPassword: password.oldPassword,
-      newPassword: password.newPassword
-    })
-    password.oldPassword = ''
-    password.newPassword = ''
-    password.confirm = ''
-    toast.success('密码已更新')
-  } catch (err) {
-    passwordErrors.oldPassword = err.message
-  } finally {
-    savingPassword.value = false
-  }
-}
 </script>
 
 <style scoped>
+/* 与其它页面一致：整页留白 */
 .page {
   padding: var(--sp-5) var(--sp-6);
 }
 
-.cols {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  gap: var(--sp-4);
-  align-items: start;
+/* 单列自上而下。
+   宽度限制：表单行太长不好读，所以给一个阅读宽度；
+   居中（margin-inline: auto）让两侧留白相等，不然 760 摆在 1040 的内容区里
+   右边会空出一大块，看着偏。
+   想铺满内容区：删掉下面三行里的 max-width 与 margin-inline 即可。 */
+.stack {
+  margin-top: var(--sp-4);
+  max-width: 880px;
+  margin-inline: auto;
 }
 
-.side {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-4);
-}
-
+/* .sheet 只负责「纸」的外观，内边距由页面自己给 */
 .card {
   padding: var(--sp-5);
 }
@@ -388,10 +219,6 @@ async function savePassword() {
   font-size: var(--fs-xs);
   line-height: 1.8;
   color: var(--ink-3);
-}
-
-.card__hint--ok {
-  color: var(--accent-ink);
 }
 
 /* ---------------- 头像 ---------------- */
@@ -482,40 +309,84 @@ async function savePassword() {
   color: var(--ink-3);
 }
 
-/* ---------------- 邮箱 ---------------- */
-.email {
+/* ---------------- AI 额度：一行左右分布 ---------------- */
+.stat {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--sp-3);
-  padding: var(--sp-3) 0;
-  margin-bottom: var(--sp-1);
-  border-bottom: 1px solid var(--rule);
+  gap: var(--sp-4);
+}
+
+.stat__text {
+  min-width: 0;
+}
+
+.stat__label {
   font-size: var(--fs-sm);
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+.stat__value {
+  flex: 0 0 auto;
+  font-family: var(--font-serif);
+  font-size: 34px;
+  line-height: 1;
+  color: var(--accent);
+}
+
+.stat__value.is-low {
+  color: var(--danger);
+}
+
+.stat__unit {
+  font-family: var(--font-sans);
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  margin-left: 4px;
+}
+
+/* ---------------- 账号与安全 ---------------- */
+.meta {
+  display: grid;
+  grid-template-columns: 5.5em minmax(0, 1fr);
+  gap: 6px var(--sp-3);
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-sm);
+}
+
+.meta dt {
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+}
+
+.meta dd {
+  margin: 0;
+  color: var(--ink);
   word-break: break-all;
 }
 
-.email__empty {
-  color: var(--ink-3);
-}
-
-.link {
-  flex: 0 0 auto;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--accent);
+.meta__mono {
+  font-family: var(--font-mono);
   font-size: var(--fs-xs);
-  cursor: pointer;
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
-.code-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--sp-2);
-  align-items: end;
+.btn-link {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  color: var(--accent-ink);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.btn-link:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  text-decoration: none;
 }
 
 /* ---------------- 其余 ---------------- */
@@ -528,31 +399,23 @@ async function savePassword() {
 .form__actions {
   display: flex;
   justify-content: flex-end;
-  margin-top: var(--sp-1);
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
 }
 
-.quota {
-  font-family: var(--font-serif);
-  font-size: 40px;
-  line-height: 1.1;
-  color: var(--accent);
-  margin-bottom: var(--sp-2);
-}
+@media (max-width: 720px) {
+  .page {
+    padding: var(--sp-4) var(--sp-3);
+  }
 
-.quota.is-low {
-  color: var(--danger);
-}
+  .card {
+    padding: var(--sp-4) var(--sp-3);
+  }
 
-.quota__unit {
-  font-family: var(--font-sans);
-  font-size: var(--fs-sm);
-  color: var(--ink-3);
-  margin-left: 4px;
-}
-
-@media (max-width: 900px) {
-  .cols {
-    grid-template-columns: minmax(0, 1fr);
+  .stat {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--sp-2);
   }
 }
 </style>

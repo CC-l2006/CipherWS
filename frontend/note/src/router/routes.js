@@ -78,6 +78,14 @@ export const constantRoutes = [
         name: 'profile',
         component: () => import('@/views/Profile.vue'),
         meta: { title: '个人资料', requiresAuth: true }
+      },
+      {
+        // 账号与安全：更换绑定邮箱（两步验证）、修改密码（邮箱验证码）
+        // 单独一页，从侧栏左下角的「设置」进入
+        path: 'settings',
+        name: 'settings',
+        component: () => import('@/views/Settings.vue'),
+        meta: { title: '设置', requiresAuth: true }
       }
     ]
   }

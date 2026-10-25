@@ -66,7 +66,12 @@ public class UserServiceImpl implements UserService {
 
     private static final String PURPOSE_REGISTER = "register";
     private static final String PURPOSE_RESET = "reset";
-    private static final String PURPOSE_BIND = "bind";
+    /** 更换邮箱第 1 步：验证**当前**邮箱 */
+    private static final String PURPOSE_BIND_OLD = "bind_old";
+    /** 更换邮箱第 2 步：验证**新**邮箱 */
+    private static final String PURPOSE_BIND_NEW = "bind_new";
+    /** 修改密码 */
+    private static final String PURPOSE_PASSWORD = "password";
 
     private final UserMapper userMapper;
     private final MailService mailService;
@@ -84,6 +89,20 @@ public class UserServiceImpl implements UserService {
 
     /** 邮箱 -> 上次发送时间戳，用于 60 秒频控 */
     private final Map<String, Long> lastSentAt = new ConcurrentHashMap<>();
+
+    /**
+     * 用户 -> 「当前邮箱已验证」的过期时间戳（毫秒）。
+     *
+     * 更换绑定邮箱是两步的：先证明你是旧邮箱的主人，再证明新邮箱归你。
+     * 第一步通过后在这里记一笔，第二步必须看到这笔记录才允许改库，
+     * 否则「只要拿到新邮箱的验证码」就能换绑 —— 等于绕过了旧邮箱这道关。
+     *
+     * 只放内存：单实例够用；服务重启即失效，反而更安全（不需要清理任务）。
+     */
+    private final Map<Long, Long> oldEmailVerified = new ConcurrentHashMap<>();
+
+    /** 第一步的验证结果保留 10 分钟，够用户去新邮箱收码 */
+    private static final long OLD_VERIFY_TTL_MILLIS = 10 * 60_000L;
 
     /** 一个验证码的全部状态。attempts 可变，所以不用 record */
     private static final class CodeEntry {
@@ -202,34 +221,56 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public SendCodeRes issueCode(Long currentUserId, String email, String purpose) {
-        String mail = normalizeEmail(email);
         String use = resolvePurpose(purpose);
+        String mail;
 
-        if (!EMAIL.matcher(mail).matches()) {
-            throw new BusinessException("邮箱格式不正确");
-        }
-
-        if (PURPOSE_REGISTER.equals(use)) {
-            // 注册：这个邮箱还不能被注册过
-            if (userMapper.countByEmail(mail) > 0) {
-                throw new BusinessException("该邮箱已注册，请直接登录");
+        if (PURPOSE_REGISTER.equals(use) || PURPOSE_RESET.equals(use)) {
+            // 未登录也能发的两种：注册 / 找回密码
+            mail = normalizeEmail(email);
+            if (!EMAIL.matcher(mail).matches()) {
+                throw new BusinessException("邮箱格式不正确");
             }
-        } else if (PURPOSE_RESET.equals(use)) {
-            // 找回密码：邮箱必须是某个已有账号的登录邮箱
-            if (userMapper.countByEmail(mail) == 0) {
-                throw new BusinessException("该邮箱未注册");
+            if (PURPOSE_REGISTER.equals(use)) {
+                // 注册：这个邮箱还不能被注册过
+                if (userMapper.countByEmail(mail) > 0) {
+                    throw new BusinessException("该邮箱已注册，请直接登录");
+                }
+            } else {
+                // 找回密码：邮箱必须是某个已有账号的登录邮箱
+                if (userMapper.countByEmail(mail) == 0) {
+                    throw new BusinessException("该邮箱未注册");
+                }
             }
         } else {
-            // 绑定邮箱：这个地址不能被别人占着
+            // 更换邮箱（两步）与改密码都要求登录
             if (currentUserId == null) {
                 throw new BusinessException("未登录，请先登录");
             }
             NoteUser me = userMapper.findById(currentUserId);
-            if (me != null && mail.equalsIgnoreCase(me.getEmail())) {
-                throw new BusinessException("这个邮箱已经绑定到当前账号了");
+            if (me == null) {
+                throw new BusinessException("用户不存在");
             }
-            if (userMapper.countByEmailExcluding(currentUserId, mail) > 0) {
-                throw new BusinessException("该邮箱已被其他账号绑定");
+            String current = normalizeEmail(me.getEmail());
+
+            if (PURPOSE_BIND_NEW.equals(use)) {
+                // 第 2 步：发给**新**邮箱，且不能被别人占着
+                mail = normalizeEmail(email);
+                if (!EMAIL.matcher(mail).matches()) {
+                    throw new BusinessException("邮箱格式不正确");
+                }
+                if (mail.equals(current)) {
+                    throw new BusinessException("新邮箱与当前邮箱相同，无需更换");
+                }
+                if (userMapper.countByEmailExcluding(currentUserId, mail) > 0) {
+                    throw new BusinessException("该邮箱已被其他账号绑定");
+                }
+            } else {
+                // bind_old / password：一律发给**当前**邮箱，
+                // 忽略请求体里的 email —— 否则调用方随便传个地址就能收码
+                if (current.isEmpty()) {
+                    throw new BusinessException("当前账号还没有绑定邮箱，无法发送验证码");
+                }
+                mail = current;
             }
         }
 
@@ -351,8 +392,28 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
+    public void verifyOldEmail(long userId, String code) {
+        NoteUser me = userMapper.findById(userId);
+        if (me == null) {
+            throw new BusinessException("用户不存在");
+        }
+        String current = normalizeEmail(me.getEmail());
+        if (current.isEmpty()) {
+            throw new BusinessException("当前账号还没有绑定邮箱，无法验证");
+        }
+
+        // 用途必须是 bind_old：拿「改密码」的码来验证旧邮箱会被拦下
+        consumeCode(current, PURPOSE_BIND_OLD, code);
+
+        // 记一个短时有效的标记，第 2 步改库时要检查它。
+        // 只放内存：单实例够用，且这个标记天然随服务重启失效，比落库更安全。
+        oldEmailVerified.put(userId, System.currentTimeMillis() + OLD_VERIFY_TTL_MILLIS);
+        writeUserLog(userId, "验证邮箱", "通过验证码验证了当前邮箱 " + maskEmail(current));
+    }
+
+    @Override
     public UserVo bindEmail(long userId, String email, String code) {
-        String mail = email == null ? "" : email.trim().toLowerCase();
+        String mail = normalizeEmail(email);
         if (!EMAIL.matcher(mail).matches()) {
             throw new BusinessException("邮箱格式不正确");
         }
@@ -361,27 +422,41 @@ public class UserServiceImpl implements UserService {
         if (me == null) {
             throw new BusinessException("用户不存在");
         }
-        if (mail.equalsIgnoreCase(me.getEmail())) {
-            throw new BusinessException("这个邮箱已经绑定到当前账号了");
+        String current = normalizeEmail(me.getEmail());
+        if (mail.equals(current)) {
+            throw new BusinessException("新邮箱与当前邮箱相同，无需更换");
         }
         if (userMapper.countByEmailExcluding(userId, mail) > 0) {
             throw new BusinessException("该邮箱已被其他账号绑定");
         }
 
+        // 第 1 步必须已通过：否则「只要拿到新邮箱的码就能换绑」，
+        // 等于把「旧邮箱还归你」这件事跳过去了。
+        if (!current.isEmpty()) {
+            Long exp = oldEmailVerified.get(userId);
+            if (exp == null || exp < System.currentTimeMillis()) {
+                throw new BusinessException("请先验证当前邮箱（验证码 10 分钟内有效）");
+            }
+        }
+
         // 先验码再改库：验证码不对就什么都不动
-        consumeCode(mail, PURPOSE_BIND, code);
+        consumeCode(mail, PURPOSE_BIND_NEW, code);
 
         userMapper.updateEmail(userId, mail);
-        writeUserLog(userId, "绑定邮箱", "绑定邮箱 " + maskEmail(mail));
+        // 换绑成功后立刻作废标记，避免短时间内被反复利用
+        oldEmailVerified.remove(userId);
+        writeUserLog(userId, "更换绑定邮箱",
+                "邮箱由 " + maskEmail(current) + " 更换为 " + maskEmail(mail));
         return profile(userId);
     }
 
     @Override
-    public void changePassword(long userId, String oldPassword, String newPassword) {
+    public void changePassword(long userId, String oldPassword, String newPassword, String code) {
         if (newPassword == null || newPassword.length() < 6) {
             throw new BusinessException("新密码至少 6 位");
         }
 
+        // 1) 先校验旧密码（最便宜的一步，错在这里就不用消耗验证码）
         String stored = userMapper.findPasswordById(userId);
         if (stored == null || !passwordEncoder.matches(oldPassword == null ? "" : oldPassword, stored)) {
             throw new BusinessException("原密码不正确");
@@ -390,27 +465,44 @@ public class UserServiceImpl implements UserService {
             throw new BusinessException("新密码不能与原密码相同");
         }
 
+        // 2) 再校验邮箱验证码：证明这个操作是账号主本人发起的
+        NoteUser me = userMapper.findById(userId);
+        String current = me == null ? "" : normalizeEmail(me.getEmail());
+        if (current.isEmpty()) {
+            throw new BusinessException("当前账号还没有绑定邮箱，无法通过验证码修改密码");
+        }
+        consumeCode(current, PURPOSE_PASSWORD, code);
+
         userMapper.updatePassword(userId, passwordEncoder.encode(newPassword));
+        writeUserLog(userId, "修改密码", "通过邮箱验证码修改了密码");
     }
 
     /* ------------------------------ 内部工具 ------------------------------ */
 
     /**
      * 把前端传来的 purpose 归一化。
+     *
      * 认不出来的一律按 reset 处理（兼容老调用方只传 email 的情况）。
+     * 老的 "bind" 映射到 bind_new，只是为了让还没更新的旧前端不至于报错。
      */
     private static String resolvePurpose(String purpose) {
         if (purpose == null) {
             return PURPOSE_RESET;
         }
         String p = purpose.trim().toLowerCase();
-        if (PURPOSE_REGISTER.equals(p)) {
-            return PURPOSE_REGISTER;
+        switch (p) {
+            case PURPOSE_REGISTER:
+                return PURPOSE_REGISTER;
+            case PURPOSE_BIND_OLD:
+                return PURPOSE_BIND_OLD;
+            case PURPOSE_BIND_NEW:
+            case "bind":
+                return PURPOSE_BIND_NEW;
+            case PURPOSE_PASSWORD:
+                return PURPOSE_PASSWORD;
+            default:
+                return PURPOSE_RESET;
         }
-        if (PURPOSE_BIND.equals(p)) {
-            return PURPOSE_BIND;
-        }
-        return PURPOSE_RESET;
     }
 
     /**

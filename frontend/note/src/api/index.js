@@ -15,7 +15,7 @@ export const authApi = {
    * 发验证码。purpose 决定后端怎么校验这个邮箱：
    *   'register' 注册 —— 邮箱必须**未**注册
    *   'reset'    找回密码（缺省）—— 邮箱必须已注册
-   * 绑定邮箱不走这里（要登录态），用 userApi.sendBindCode。
+   * 换绑邮箱不走这里（要登录态），用 userApi.sendOldEmailCode / sendNewEmailCode。
    */
   sendCode: (email, purpose = 'reset') =>
     request('/auth/send-code', { method: 'POST', body: { email, purpose } }),
@@ -25,14 +25,28 @@ export const authApi = {
 /* ---------------- 用户中心 ---------------- */
 export const userApi = {
   profile: () => request('/user/profile'),
-  // 注意：换邮箱不走这里，必须走 sendBindCode + bindEmail 两步（要验证码）
+  // 注意：换邮箱不走这里，必须走「先验旧邮箱、再验新邮箱」两步（见下方 userApi）
   updateProfile: (body) => request('/user/profile', { method: 'PUT', body }),
   changePassword: (body) => request('/user/password', { method: 'PUT', body }),
   quota: () => request('/user/quota'),
-  /** 绑定邮箱第一步：给新邮箱发验证码 */
-  sendBindCode: (email) => request('/user/email/code', { method: 'POST', body: { email } }),
-  /** 绑定邮箱第二步：带上验证码换绑 */
+
+  /* ---- 更换绑定邮箱：先验旧邮箱，再验新邮箱，两步都过才生效 ---- */
+  /** 第 1 步：给**当前**邮箱发验证码（不用传 email，服务端自己取） */
+  sendOldEmailCode: () =>
+    request('/user/email/code', { method: 'POST', body: { purpose: 'bind_old' } }),
+  /** 第 1 步校验：码对了才能进入第 2 步（服务端记 10 分钟） */
+  verifyOldEmail: (code) =>
+    request('/user/email/verify-old', { method: 'POST', body: { code } }),
+  /** 第 2 步：给**新**邮箱发验证码 */
+  sendNewEmailCode: (email) =>
+    request('/user/email/code', { method: 'POST', body: { purpose: 'bind_new', email } }),
+  /** 第 2 步确认：新邮箱 + 新邮箱收到的码 */
   bindEmail: (body) => request('/user/email', { method: 'PUT', body }),
+
+  /* ---- 修改密码：需要发到当前邮箱的验证码 ---- */
+  /** 给当前邮箱发验证码 */
+  sendPasswordCode: () => request('/user/password/code', { method: 'POST' }),
+
   /** 上传头像（multipart） */
   uploadAvatar: (file) => upload('/user/avatar', file)
 }

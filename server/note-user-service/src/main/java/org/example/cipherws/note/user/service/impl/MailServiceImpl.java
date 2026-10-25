@@ -46,18 +46,38 @@ public class MailServiceImpl implements MailService {
 
     @Override
     public void sendCode(String to, String code, String purpose) {
-        // 三种用途的措辞不同，别让用户在「注册」时收到一封「绑定邮箱」的邮件
+        // 每种用途的措辞都不同，别让用户在「注册」时收到一封「绑定邮箱」的邮件，
+        // 也别让「验证旧邮箱」和「验证新邮箱」看起来一样 —— 用户要能一眼分清
+        // 这封邮件是在确认哪个动作。
         String subject;
         String lead;
-        if ("register".equals(purpose)) {
-            subject = "【池禾笔记】注册验证码";
-            lead = "你正在注册池禾笔记账号，验证邮箱归属。";
-        } else if ("reset".equals(purpose)) {
-            subject = "【池禾笔记】重置密码验证码";
-            lead = "你正在重置密码。";
-        } else {
-            subject = "【池禾笔记】绑定邮箱验证码";
-            lead = "你正在为账号绑定这个邮箱。";
+        switch (purpose == null ? "" : purpose) {
+            case "register":
+                subject = "【池禾笔记】注册验证码";
+                lead = "你正在注册池禾笔记账号，验证邮箱归属。";
+                break;
+            case "reset":
+                subject = "【池禾笔记】重置密码验证码";
+                lead = "你正在重置密码。";
+                break;
+            case "bind_old":
+                subject = "【池禾笔记】更换邮箱：验证当前邮箱";
+                lead = "你正在更换绑定邮箱，这是第 1 步：验证你当前的邮箱。\n"
+                        + "通过之后才能绑定新邮箱。";
+                break;
+            case "bind_new":
+                subject = "【池禾笔记】更换邮箱：验证新邮箱";
+                lead = "你正在更换绑定邮箱，这是第 2 步：验证这个新邮箱。";
+                break;
+            case "password":
+                subject = "【池禾笔记】修改密码验证码";
+                lead = "你正在修改登录密码，需要验证当前邮箱。";
+                break;
+            default:
+                // 老的 "bind" 之类，按绑定新邮箱处理
+                subject = "【池禾笔记】绑定邮箱验证码";
+                lead = "你正在为账号绑定这个邮箱。";
+                break;
         }
         String text = """
                 %s
