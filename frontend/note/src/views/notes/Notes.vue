@@ -1,7 +1,7 @@
 <template>
   <div class="workspace">
     <!-- ==================== 左：笔记列表 ==================== -->
-    <section class="list" aria-label="笔记列表">
+    <section class="list" :class="{ 'is-resizing': resizingFolders }" aria-label="笔记列表">
       <div class="list__head">
         <input
           v-model="keyword"
@@ -13,18 +13,105 @@
         <AppButton variant="primary" size="sm" @click="createNote">新笔记</AppButton>
       </div>
 
-      <div class="list__filters">
-        <button
-          v-for="f in statusFilters"
-          :key="f.value"
-          type="button"
-          class="chip"
-          :class="{ 'is-active': statusFilter === f.value }"
-          @click="statusFilter = f.value"
-        >
-          {{ f.label }}
-        </button>
+      <!-- 文件夹：绑定标签，带这些标签的笔记自动归入 -->
+      <div class="folders" :style="{ height: foldersHeight + 'px' }">
+        <div class="folders__head">
+          <span>文件夹</span>
+          <div class="folders__actions">
+            <div ref="tagMenuEl" class="tag-menu">
+              <button
+                type="button"
+                class="tag-toggle"
+                :class="{ 'is-active': tagPanelOpen || tagFilter.length }"
+                :aria-expanded="tagPanelOpen"
+                @click="tagPanelOpen = !tagPanelOpen"
+              >
+                标签<span v-if="tagFilter.length">（{{ tagFilter.length }}）</span>
+              </button>
+
+              <!-- 标签筛选：挂在按钮下方，点空白处收起 -->
+              <div v-if="tagPanelOpen" class="tag-panel">
+                <div class="tag-panel__head">
+                  <span>按标签筛选</span>
+                  <button
+                    v-if="tagFilter.length"
+                    type="button"
+                    class="tag-panel__clear"
+                    @click="tagFilter = []"
+                  >
+                    清除
+                  </button>
+                </div>
+                <div class="tag-panel__chips">
+                  <button
+                    v-for="t in tags"
+                    :key="t.id"
+                    type="button"
+                    class="tag-chip"
+                    :class="{ 'is-active': tagFilter.includes(t.id) }"
+                    @click="toggleTagFilter(t.id)"
+                  >
+                    {{ t.name }}
+                  </button>
+                  <span v-if="!tags.length" class="tag-filter__empty">暂无标签</span>
+                </div>
+              </div>
+            </div>
+
+            <button type="button" class="folders__add" title="新建文件夹" @click="openFolderForm()">
+              ＋
+            </button>
+          </div>
+        </div>
+
+        <div class="folders__list">
+          <button
+            type="button"
+            class="folder"
+            :class="{ 'is-active': selectedFolder === 'all' }"
+            @click="selectedFolder = 'all'"
+          >
+            全部笔记
+          </button>
+          <button
+            type="button"
+            class="folder"
+            :class="{ 'is-active': selectedFolder === 'untagged' }"
+            @click="selectedFolder = 'untagged'"
+          >
+            未分类
+          </button>
+          <div
+            v-for="f in folders"
+            :key="f.id"
+            class="folder-row"
+            :class="{ 'is-active': selectedFolder === f.id }"
+          >
+            <button type="button" class="folder-row__main" @click="selectedFolder = f.id">
+              <span class="folder-row__name">{{ f.name }}</span>
+              <span class="folder-row__count">{{ f.noteCount }}</span>
+            </button>
+            <button
+              type="button"
+              class="folder-row__edit"
+              aria-label="编辑文件夹"
+              @click.stop="openFolderForm(f)"
+            >
+              ✎
+            </button>
+          </div>
+        </div>
       </div>
+
+      <!-- 文件夹区与笔记列表的上下分界，拖动调整高度，双击复位 -->
+      <div
+        class="v-resizer"
+        role="separator"
+        aria-orientation="horizontal"
+        title="拖动调整文件夹高度，双击复位"
+        @mousedown="startFoldersResize"
+        @dblclick="resetFoldersHeight"
+      />
 
       <div class="list__scroll">
         <div v-if="listLoading" class="loading-rule" />
@@ -43,7 +130,6 @@
         >
           <span class="item__top">
             <span class="item__title">{{ n.title }}</span>
-            <span v-if="n.status === 'draft'" class="item__draft">草稿</span>
           </span>
           <span class="item__snippet">{{ snippet(n.content) }}</span>
           <span class="item__meta">
@@ -90,37 +176,9 @@
       <template v-if="hasNote">
         <header class="bar">
           <div class="bar__left">
-            <button
-              v-if="draft.status === 'draft'"
-              type="button"
-              class="bar__status is-draft"
-              title="点击发布为私有笔记"
-              @click="draft.status = 'private'"
-            >
-              草稿
+            <button type="button" class="tags__btn" @click="tagModalOpen = true">
+              标签<span v-if="draftTagNames.length">（{{ draftTagNames.length }}）</span>
             </button>
-            <button
-              v-else
-              type="button"
-              class="bar__status"
-              title="点击退回草稿"
-              @click="draft.status = 'draft'"
-            >
-              已发布
-            </button>
-
-            <div class="tags">
-              <button type="button" class="tags__btn" @click="tagPickerOpen = !tagPickerOpen">
-                标签<span v-if="draftTagNames.length">（{{ draftTagNames.length }}）</span>
-              </button>
-              <div v-if="tagPickerOpen" class="tags__pop">
-                <p v-if="!tags.length" class="tags__empty">还没有标签，去「标签」页新建</p>
-                <label v-for="t in tags" :key="t.id" class="tags__opt">
-                  <input v-model="draft.tagIds" type="checkbox" :value="t.id" />
-                  <span>{{ t.name }}</span>
-                </label>
-              </div>
-            </div>
           </div>
 
           <div class="bar__right">
@@ -342,16 +400,72 @@
         </AppEmpty>
       </div>
     </section>
+
+    <!-- 编辑笔记时打标签：勾选 + 直接新建 -->
+    <AppModal v-model="tagModalOpen" title="笔记标签" width="420px">
+      <div class="tag-picker">
+        <label v-for="t in tags" :key="t.id" class="tag-picker__item">
+          <input v-model="draft.tagIds" type="checkbox" :value="t.id" />
+          <span>{{ t.name }}</span>
+        </label>
+        <p v-if="!tags.length" class="tag-picker__empty">还没有标签，在下面新建一个</p>
+      </div>
+      <div class="tag-picker__new">
+        <input
+          v-model="newTagName"
+          class="tag-picker__input"
+          type="text"
+          maxlength="12"
+          placeholder="新标签名"
+          @keyup.enter="createTagInline"
+        />
+        <AppButton size="sm" :loading="newTagSaving" @click="createTagInline">新建</AppButton>
+      </div>
+      <template #footer>
+        <AppButton variant="primary" @click="tagModalOpen = false">完成</AppButton>
+      </template>
+    </AppModal>
+
+    <!-- 新建 / 编辑文件夹：文件夹绑定标签，笔记按标签自动归入 -->
+    <AppModal
+      v-model="folderModalOpen"
+      :title="folderForm.id ? '编辑文件夹' : '新建文件夹'"
+      width="460px"
+    >
+      <AppField
+        v-model="folderForm.name"
+        label="文件夹名"
+        placeholder="例如 Java"
+        :maxlength="20"
+        required
+      />
+      <p class="folder-hint">勾选标签后，带这些标签的笔记会自动归入。</p>
+      <div class="tag-picker">
+        <label v-for="t in tags" :key="t.id" class="tag-picker__item">
+          <input v-model="folderForm.tagIds" type="checkbox" :value="t.id" />
+          <span>{{ t.name }}</span>
+        </label>
+        <p v-if="!tags.length" class="tag-picker__empty">还没有标签，先去「标签」页新建</p>
+      </div>
+      <template #footer>
+        <AppButton v-if="folderForm.id" variant="danger" @click="deleteFolder">删除</AppButton>
+        <span class="modal-spacer" />
+        <AppButton @click="folderModalOpen = false">取消</AppButton>
+        <AppButton variant="primary" :loading="folderSaving" @click="saveFolder">保存</AppButton>
+      </template>
+    </AppModal>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, watch, nextTick, onBeforeUnmount, onMounted } from 'vue'
+import { computed, reactive, ref, watch, nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AppButton from '@/components/AppButton.vue'
 import AppTag from '@/components/AppTag.vue'
 import AppEmpty from '@/components/AppEmpty.vue'
-import { noteApi, tagApi, aiApi } from '@/api/index.js'
+import AppField from '@/components/AppField.vue'
+import AppModal from '@/components/AppModal.vue'
+import { noteApi, tagApi, aiApi, folderApi } from '@/api/index.js'
 import { useUserStore } from '@/stores/user.js'
 import { useToastStore } from '@/stores/toast.js'
 
@@ -365,19 +479,69 @@ const toast = useToastStore()
 const notes = ref([])
 const listLoading = ref(false)
 const keyword = ref('')
-const statusFilter = ref('')
-const statusFilters = [
-  { value: '', label: '全部' },
-  { value: 'draft', label: '草稿' },
-  { value: 'private', label: '已发布' }
-]
+const folders = ref([])
+/** 'all' | 'untagged' | 文件夹 id */
+const selectedFolder = ref('all')
+/** 多选的标签筛选，和文件夹条件取交集 */
+const tagFilter = ref([])
+const tagPanelOpen = ref(false)
+const tagMenuEl = ref(null)
+
+/* 文件夹区高度：拖动上下分界调整，双击复位，记住上次的值 */
+const FOLDERS_MIN = 120
+const foldersHeight = ref(220)
+const resizingFolders = ref(false)
+try {
+  const saved = Number(localStorage.getItem('note_folders_h'))
+  if (Number.isFinite(saved) && saved >= FOLDERS_MIN && saved <= 800) foldersHeight.value = saved
+} catch {
+  /* 隐私模式下读不到就用默认值 */
+}
+
+function startFoldersResize(e) {
+  const list = e.currentTarget.closest('.list')
+  if (!list) return
+  e.preventDefault()
+  resizingFolders.value = true
+  const startY = e.clientY
+  const startHeight = foldersHeight.value
+  const maxHeight = Math.max(FOLDERS_MIN + 40, list.clientHeight - 180)
+
+  const onMove = (ev) => {
+    const next = Math.min(maxHeight, Math.max(FOLDERS_MIN, startHeight + (ev.clientY - startY)))
+    foldersHeight.value = Math.round(next)
+  }
+  const onUp = () => {
+    resizingFolders.value = false
+    window.removeEventListener('mousemove', onMove)
+    window.removeEventListener('mouseup', onUp)
+    try {
+      localStorage.setItem('note_folders_h', String(foldersHeight.value))
+    } catch {
+      /* 忽略 */
+    }
+  }
+  window.addEventListener('mousemove', onMove)
+  window.addEventListener('mouseup', onUp)
+}
+
+function resetFoldersHeight() {
+  foldersHeight.value = 220
+  try {
+    localStorage.setItem('note_folders_h', '220')
+  } catch {
+    /* 忽略 */
+  }
+}
 
 async function loadList() {
   listLoading.value = true
   try {
     const { data } = await noteApi.list({
-      keyword: keyword.value.trim(),
-      status: statusFilter.value
+      keyword: keyword.value.trim() || undefined,
+      folderId: typeof selectedFolder.value === 'number' ? selectedFolder.value : undefined,
+      tagIds: tagFilter.value.length ? tagFilter.value.join(',') : undefined,
+      untagged: selectedFolder.value === 'untagged' ? true : undefined
     })
     notes.value = data
   } catch (err) {
@@ -392,12 +556,30 @@ watch(keyword, () => {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(loadList, 260)
 })
-watch(statusFilter, loadList)
+watch(selectedFolder, loadList)
+watch(() => tagFilter.value.join(','), loadList)
+
+async function loadFolders() {
+  try {
+    const { data } = await folderApi.list()
+    folders.value = data
+  } catch (err) {
+    toast.error(err.message)
+  }
+}
+
+function toggleTagFilter(id) {
+  const index = tagFilter.value.indexOf(id)
+  if (index >= 0) tagFilter.value.splice(index, 1)
+  else tagFilter.value.push(id)
+}
 
 /* ---------------- 标签 ---------------- */
 
 const tags = ref([])
-const tagPickerOpen = ref(false)
+const tagModalOpen = ref(false)
+const newTagName = ref('')
+const newTagSaving = ref(false)
 const draftTagNames = computed(() => {
   const ids = draft.value?.tagIds || []
   return tags.value.filter((t) => ids.includes(t.id)).map((t) => t.name)
@@ -407,6 +589,75 @@ async function loadTags() {
   try {
     const { data } = await tagApi.list()
     tags.value = data
+  } catch (err) {
+    toast.error(err.message)
+  }
+}
+
+/** 编辑笔记时直接新建标签，并自动勾选到当前笔记 */
+async function createTagInline() {
+  const name = newTagName.value.trim()
+  if (!name) return
+  newTagSaving.value = true
+  try {
+    const { data } = await tagApi.create(name)
+    tags.value.push(data)
+    if (draft.value && !draft.value.tagIds.includes(data.id)) draft.value.tagIds.push(data.id)
+    newTagName.value = ''
+    await loadFolders()
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    newTagSaving.value = false
+  }
+}
+
+/* ---------------- 文件夹 ---------------- */
+
+const folderModalOpen = ref(false)
+const folderSaving = ref(false)
+const folderForm = reactive({ id: null, name: '', tagIds: [] })
+
+function openFolderForm(folder = null) {
+  folderForm.id = folder?.id ?? null
+  folderForm.name = folder?.name ?? ''
+  folderForm.tagIds = folder ? [...folder.tagIds] : []
+  folderModalOpen.value = true
+}
+
+async function saveFolder() {
+  const name = folderForm.name.trim()
+  if (!name) {
+    toast.warn('文件夹名不能为空')
+    return
+  }
+  folderSaving.value = true
+  try {
+    const body = { name, tagIds: folderForm.tagIds }
+    if (folderForm.id) await folderApi.update(folderForm.id, body)
+    else await folderApi.create(body)
+    await loadFolders()
+    await loadList()
+    folderModalOpen.value = false
+    toast.success(folderForm.id ? '已保存' : '已创建')
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    folderSaving.value = false
+  }
+}
+
+async function deleteFolder() {
+  if (!folderForm.id) return
+  if (!window.confirm(`删除文件夹「${folderForm.name}」？笔记和标签都不会被删除。`)) return
+  try {
+    const id = folderForm.id
+    await folderApi.remove(id)
+    if (selectedFolder.value === id) selectedFolder.value = 'all'
+    folderModalOpen.value = false
+    await loadFolders()
+    await loadList()
+    toast.success('已删除')
   } catch (err) {
     toast.error(err.message)
   }
@@ -732,7 +983,7 @@ async function loadNote(id) {
       id: data.id,
       title: data.title,
       content: data.content,
-      status: data.status,
+      status: 'private',
       tagIds: (data.tags || []).map((t) => t.id)
     }
     summaries.value = data.summaries || []
@@ -766,7 +1017,7 @@ watch(
 let suppressAutoSave = false
 
 watch(
-  () => [draft.value?.title, draft.value?.content, draft.value?.status, draft.value?.tagIds],
+  () => [draft.value?.title, draft.value?.content, draft.value?.tagIds],
   () => {
     if (suppressAutoSave) return
     if (!draft.value?.id) return
@@ -787,7 +1038,7 @@ async function saveNow(announce = false) {
     const { data } = await noteApi.update(draft.value.id, {
       title: draft.value.title,
       content: draft.value.content,
-      status: draft.value.status,
+      status: 'private',
       tagIds: draft.value.tagIds
     })
     // 用服务端返回的标题兜底（空标题会被后端补成「无标题笔记」）
@@ -797,6 +1048,7 @@ async function saveNow(announce = false) {
     if (i >= 0) notes.value[i] = { ...notes.value[i], ...data }
     saveState.value = 'saved'
     dirty.value = false
+    loadFolders()
     if (announce) toast.success('已保存')
   } catch (err) {
     saveState.value = 'error'
@@ -1302,6 +1554,7 @@ function onBeforeUnload(e) {
 
 function onDocumentClick(e) {
   if (menu.value && !toolbarEl.value?.contains(e.target)) menu.value = ''
+  if (tagPanelOpen.value && !tagMenuEl.value?.contains(e.target)) tagPanelOpen.value = false
 }
 
 onMounted(() => {
@@ -1319,7 +1572,7 @@ async function createNote() {
   creating.value = true
   try {
     await flushSave()
-    const { data } = await noteApi.create({ title: '', content: '', status: 'draft', tagIds: [] })
+    const { data } = await noteApi.create({ title: '', content: '', status: 'private', tagIds: [] })
     await loadList()
     router.push(`/notes/${data.id}`)
   } catch (err) {
@@ -1340,6 +1593,7 @@ async function removeNote() {
     dirty.value = false
     toast.success('已移入回收站，可在回收站恢复')
     await loadList()
+    await loadFolders()
     router.replace('/notes')
   } catch (err) {
     toast.error(err.message)
@@ -1407,6 +1661,7 @@ function relTime(iso) {
 
 loadList()
 loadTags()
+loadFolders()
 
 onBeforeUnmount(() => {
   clearTimeout(searchTimer)
@@ -1456,14 +1711,34 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
-.list__filters {
+.folders {
+  flex: none;
   display: flex;
-  gap: var(--sp-1);
-  padding: 0 var(--sp-4) var(--sp-3);
+  flex-direction: column;
+  min-height: 120px;
+  max-height: calc(100% - 180px);
+  padding: 0 var(--sp-3) var(--sp-2);
+  border-bottom: 1px solid var(--rule);
 }
 
-.chip {
-  padding: 3px 10px;
+.folders__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--sp-1) 6px;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+.folders__actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tag-toggle {
+  padding: 2px 7px;
   border: 1px solid transparent;
   border-radius: var(--r-pill);
   background: transparent;
@@ -1472,15 +1747,228 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.chip:hover {
+.tag-toggle:hover {
+  background: var(--paper-deep);
   color: var(--ink);
+}
+
+.tag-toggle.is-active {
+  border-color: var(--rule-strong);
+  background: var(--sheet);
+  color: var(--accent-ink);
+}
+
+.folders__add {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.folders__add:hover {
+  background: var(--paper-deep);
+  color: var(--ink);
+}
+
+.folders__list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow-y: auto;
+}
+
+.folder {
+  width: 100%;
+  padding: 5px var(--sp-2);
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder:hover {
   background: var(--paper-deep);
 }
 
-.chip.is-active {
-  border-color: var(--rule-strong);
+.folder.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.folder-row {
+  display: flex;
+  align-items: center;
+  border-radius: var(--r-sm);
+}
+
+.folder-row:hover {
+  background: var(--paper-deep);
+}
+
+.folder-row.is-active {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+
+.folder-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px var(--sp-2);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.folder-row__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-row__count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+}
+
+.folder-row__edit {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  opacity: 0;
+}
+
+.folder-row:hover .folder-row__edit,
+.folder-row.is-active .folder-row__edit {
+  opacity: 1;
+}
+
+.folder-row__edit:hover {
+  background: var(--paper-sink);
   color: var(--ink);
+}
+
+.tag-menu {
+  position: relative;
+}
+
+.tag-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  width: 216px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: var(--sp-2);
   background: var(--sheet);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-pop);
+}
+
+.tag-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--sp-1) 6px;
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+.tag-panel__clear {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.tag-panel__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-height: 92px;
+  overflow-y: auto;
+}
+
+.tag-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.tag-chip:hover {
+  border-color: var(--ink-3);
+  color: var(--ink);
+}
+
+.tag-chip.is-active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--ink-inverse);
+}
+
+.tag-filter__empty {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+/* 文件夹区与笔记列表之间的上下拖拽条 */
+.v-resizer {
+  flex: none;
+  position: relative;
+  height: 7px;
+  cursor: row-resize;
+  background: transparent;
+}
+
+.v-resizer::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: var(--sp-3);
+  right: var(--sp-3);
+  height: 1px;
+  transform: translateY(-50%);
+  background: var(--rule);
+  transition: height 0.15s ease, background-color 0.15s ease;
+}
+
+.v-resizer:hover::before,
+.list.is-resizing .v-resizer::before {
+  height: 2px;
+  background: var(--accent);
 }
 
 .list__scroll {
@@ -1535,12 +2023,6 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.item__draft {
-  flex: none;
-  font-size: var(--fs-xs);
-  color: var(--warn);
 }
 
 .item__snippet {
@@ -1712,25 +2194,6 @@ onBeforeUnmount(() => {
   gap: var(--sp-2);
 }
 
-.bar__status {
-  padding: 3px 10px;
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-pill);
-  background: transparent;
-  font-size: var(--fs-xs);
-  color: var(--ok);
-  cursor: pointer;
-}
-
-.bar__status.is-draft {
-  color: var(--warn);
-  border-color: var(--warn);
-}
-
-.tags {
-  position: relative;
-}
-
 .tags__btn {
   padding: 3px 10px;
   border: 1px solid var(--rule-strong);
@@ -1744,41 +2207,6 @@ onBeforeUnmount(() => {
 .tags__btn:hover {
   border-color: var(--ink-3);
   color: var(--ink);
-}
-
-.tags__pop {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 20;
-  min-width: 160px;
-  max-height: 240px;
-  overflow-y: auto;
-  padding: var(--sp-2);
-  background: var(--sheet);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r-sm);
-  box-shadow: var(--shadow-pop);
-}
-
-.tags__empty {
-  padding: var(--sp-2);
-  font-size: var(--fs-xs);
-  color: var(--ink-3);
-}
-
-.tags__opt {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  padding: 5px var(--sp-2);
-  border-radius: var(--r-sm);
-  font-size: var(--fs-sm);
-  cursor: pointer;
-}
-
-.tags__opt:hover {
-  background: var(--paper);
 }
 
 .bar__save {
@@ -2335,7 +2763,79 @@ onBeforeUnmount(() => {
   opacity: 0.75;
 }
 
-/* ==================== 响应式 ==================== */
+/* ---------- 标签 / 文件夹弹窗 ---------- */
+
+.folder-hint {
+  margin: var(--sp-3) 0 var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+.tag-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.tag-picker__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-pill);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.tag-picker__item:hover {
+  border-color: var(--ink-3);
+}
+
+.tag-picker__item input {
+  margin: 0;
+}
+
+.tag-picker__empty {
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+}
+
+.tag-picker__new {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+
+.tag-picker__input {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: var(--sheet);
+  font-size: var(--fs-sm);
+}
+
+.tag-picker__input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.modal-spacer {
+  flex: 1;
+}
+
+/* 触屏设备没有 hover，文件夹的编辑按钮要常显 */
+@media (hover: none) {
+  .folder-row__edit {
+    opacity: 1;
+  }
+}
+
 
 /* 三列（大纲 + 正文 + 批注）只在足够宽时使用。
    再窄就收起批注列，把宽度留给正文与大纲。 */
@@ -2410,6 +2910,25 @@ onBeforeUnmount(() => {
     max-height: 42vh;
     border-right: 0;
     border-bottom: 1px solid var(--rule);
+  }
+
+  /* 窄屏把文件夹和标签区收短，给笔记列表留出空间；上下拖拽条也不再用 */
+  .folders {
+    height: auto !important;
+    max-height: 200px;
+  }
+
+  .folders__list {
+    flex: none;
+    max-height: 96px;
+  }
+
+  .tag-panel__chips {
+    max-height: 56px;
+  }
+
+  .v-resizer {
+    display: none;
   }
 
   .editor {

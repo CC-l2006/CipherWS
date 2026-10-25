@@ -1,7 +1,7 @@
 -- =============================================================================
 -- CipherWS 笔记系统 —— MySQL 建表脚本
 --
--- 对应 frontend/note/需求文档.md 第 5 节的 9 张表。
+-- 对应 frontend/note/需求文档.md 第 5 节的 9 张表；另加 2 张文件夹表（10、11）。
 -- 字符集统一 utf8mb4（笔记正文会含 emoji 与中日文，utf8 存不下），
 -- 存储引擎 InnoDB（需要事务与外键式的一致性）。
 --
@@ -199,6 +199,34 @@ CREATE TABLE IF NOT EXISTS `note_ai_config` (
     `updated_at` DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = 'AI 配置表';
+
+-- -----------------------------------------------------------------------------
+-- 10. note_folder 文件夹表
+--     文件夹不直接装笔记，而是绑定标签；带这些标签的笔记自动归入。
+--     唯一键 (user_id, name)：同一用户不能有同名文件夹。
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `note_folder` (
+    `id`         BIGINT      NOT NULL AUTO_INCREMENT COMMENT '文件夹 ID',
+    `user_id`    BIGINT      NOT NULL COMMENT '所属用户',
+    `name`       VARCHAR(20) NOT NULL COMMENT '文件夹名，最多 20 字符',
+    `created_at` DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_folder_user_name` (`user_id`, `name`)
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '笔记文件夹表';
+
+-- -----------------------------------------------------------------------------
+-- 11. note_folder_tag 文件夹-标签绑定表
+--     一个文件夹可绑多个标签，一个标签也可被多个文件夹使用。
+--     两个外键都是 ON DELETE CASCADE：删文件夹 / 删标签都会自动解除绑定。
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `note_folder_tag` (
+    `folder_id` BIGINT NOT NULL,
+    `tag_id`    BIGINT NOT NULL,
+    PRIMARY KEY (`folder_id`, `tag_id`),
+    KEY `idx_folder_tag_tag` (`tag_id`),
+    CONSTRAINT `fk_folder_tag_folder` FOREIGN KEY (`folder_id`) REFERENCES `note_folder` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_folder_tag_tag` FOREIGN KEY (`tag_id`) REFERENCES `note_tag` (`id`) ON DELETE CASCADE
+) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '文件夹-标签绑定表';
 
 -- =============================================================================
 -- 初始化数据

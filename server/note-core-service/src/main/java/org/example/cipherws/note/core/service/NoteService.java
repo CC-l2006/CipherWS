@@ -3,6 +3,8 @@ package org.example.cipherws.note.core.service;
 import org.example.cipherws.note.common.result.Result;
 import org.example.cipherws.note.core.dto.NoteDtos;
 
+import java.util.List;
+
 /**
  * 笔记业务接口。
  *
@@ -12,8 +14,15 @@ import org.example.cipherws.note.core.dto.NoteDtos;
  */
 public interface NoteService {
 
-    /** 列表页：keyword 同时匹配标题与正文，status / tagId 为空表示不筛 */
-    Result listNotes(long userId, String keyword, String status, Long tagId, int page, int size);
+    /**
+     * 列表页：keyword 同时匹配标题与正文。
+     *
+     * @param folderId 只筛该文件夹绑定的标签；null 表示全部
+     * @param tagIds   笔记需带其中任意一个标签；空表示不筛
+     * @param untagged 只筛没有任何标签的笔记
+     */
+    Result listNotes(long userId, String keyword, Long folderId, List<Long> tagIds,
+                     boolean untagged, int page, int size);
 
     /** 回收站：只含 deleted=1 的笔记 */
     Result listTrashNotes(long userId, int page, int size);

@@ -17,6 +17,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /**
  * 笔记接口：路径与入参和 frontend/note/src/api/index.js 的 noteApi 一一对应。
  * 网关 StripPrefix=1 已经剥掉 /api 前缀，所以这里直接映射 /notes。
@@ -33,13 +35,14 @@ public class NoteController {
 
     @GetMapping
     public Result listNotes(@RequestParam(value = "keyword", required = false) String keyword,
-                            @RequestParam(value = "status", required = false) String status,
-                            @RequestParam(value = "tagId", required = false) Long tagId,
+                            @RequestParam(value = "folderId", required = false) Long folderId,
+                            @RequestParam(value = "tagIds", required = false) List<Long> tagIds,
+                            @RequestParam(value = "untagged", defaultValue = "false") boolean untagged,
                             @RequestParam(value = "page", defaultValue = "1") int page,
                             @RequestParam(value = "size", defaultValue = "10") int size,
                             @RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId,
                             @RequestHeader(value = Auth.HEADER_USER_ROLE, required = false) String role) {
-        return noteService.listNotes(requireLogin(userId), keyword, status, tagId, page, size);
+        return noteService.listNotes(requireLogin(userId), keyword, folderId, tagIds, untagged, page, size);
     }
 
     @GetMapping("/trash")

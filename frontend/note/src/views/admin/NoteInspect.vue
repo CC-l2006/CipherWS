@@ -31,7 +31,7 @@
 
         <template #cell-status="{ row }">
           <AppTag v-if="row.flagged" tone="danger">已标记</AppTag>
-          <AppTag v-else tone="neutral">{{ statusText(row.status) }}</AppTag>
+          <AppTag v-else tone="neutral">正常</AppTag>
         </template>
 
         <template #cell-actions="{ row }">
@@ -105,7 +105,7 @@ const columns = [
   { key: 'authorName', label: '作者', width: '120px' },
   { key: 'tags', label: '标签', width: '180px' },
   { key: 'updatedAt', label: '更新时间', width: '170px' },
-  { key: 'status', label: '状态', width: '96px' },
+  { key: 'status', label: '标记', width: '96px' },
   { key: 'actions', label: '操作', width: '170px' }
 ]
 
@@ -118,12 +118,6 @@ const loading = ref(false)
 const viewModal = ref(false)
 const viewing = ref(null)
 const busyId = ref(null)
-
-function statusText(status) {
-  if (status === 'draft') return '草稿'
-  if (status === 'private') return '私有'
-  return status || '正常'
-}
 
 async function load() {
   loading.value = true

@@ -30,8 +30,9 @@ public interface NoteMapper {
     long countNotes(@Param("userId") long userId,
                     @Param("deleted") int deleted,
                     @Param("keywordPattern") String keywordPattern,
-                    @Param("status") String status,
-                    @Param("tagId") Long tagId);
+                    @Param("folderId") Long folderId,
+                    @Param("tagIds") List<Long> tagIds,
+                    @Param("untagged") boolean untagged);
 
     /**
      * 列表 / 回收站共用的翻页查询，按 updated_at DESC, id DESC 排序。
@@ -42,8 +43,9 @@ public interface NoteMapper {
     List<Note> selectNotes(@Param("userId") long userId,
                            @Param("deleted") int deleted,
                            @Param("keywordPattern") String keywordPattern,
-                           @Param("status") String status,
-                           @Param("tagId") Long tagId,
+                           @Param("folderId") Long folderId,
+                           @Param("tagIds") List<Long> tagIds,
+                           @Param("untagged") boolean untagged,
                            @Param("limit") int limit,
                            @Param("offset") int offset);
 

@@ -38,7 +38,7 @@ import java.util.Objects;
 public class NoteServiceImpl implements NoteService {
 
     private static final String DEFAULT_TITLE = "无标题笔记";
-    private static final String STATUS_DRAFT = "draft";
+    /** 草稿 / 发布已取消：所有笔记统一是私有的「已发布」状态 */
     private static final String STATUS_PRIVATE = "private";
     /** title 列是 VARCHAR(80)，超长提前截断，别让数据库抛 Data too long 变成「数据操作失败」 */
     private static final int MAX_TITLE_LENGTH = 80;
@@ -57,17 +57,16 @@ public class NoteServiceImpl implements NoteService {
     }
 
     @Override
-    public Result listNotes(long userId, String keyword, String status, Long tagId, int page, int size) {
+    public Result listNotes(long userId, String keyword, Long folderId, List<Long> tagIds,
+                            boolean untagged, int page, int size) {
         // LIKE 的 % / _ 转义留在这一层：占位符已经防了注入，这里防的是「搜 100% 却什么都命中」
         String like = likePattern(keyword);
-        // 认不出来的 status 当没传，别把「全部」变成「一条都没有」
-        String statusFilter = normalizeStatusFilter(status);
-        return pagedNotes(userId, NOT_DELETED, like, statusFilter, tagId, page, size);
+        return pagedNotes(userId, NOT_DELETED, like, folderId, tagIds, untagged, page, size);
     }
 
     @Override
     public Result listTrashNotes(long userId, int page, int size) {
-        return pagedNotes(userId, DELETED, null, null, null, page, size);
+        return pagedNotes(userId, DELETED, null, null, null, false, page, size);
     }
 
     @Override
@@ -100,7 +99,8 @@ public class NoteServiceImpl implements NoteService {
         note.setUserId(userId);
         note.setTitle(normalizeTitle(request.title()));
         note.setContent(request.content() == null ? "" : request.content());
-        note.setStatus(normalizeStatusForWrite(request.status()));
+        // 草稿/发布已取消：新建就是私有笔记
+        note.setStatus(STATUS_PRIVATE);
 
         // 插入时已经配了 useGeneratedKeys，自增主键会回填到 note.id
         noteMapper.insertNote(note);
@@ -121,8 +121,8 @@ public class NoteServiceImpl implements NoteService {
         // null 交给 XML 里的 <if> 判空跳过；updated_at 由 SQL 无条件 touch。
         String title = request.title() == null ? null : normalizeTitle(request.title());
         String content = request.content();
-        String status = request.status() == null ? null : normalizeStatusForWrite(request.status());
-        noteMapper.updateNoteFields(noteId, userId, title, content, status);
+        // 状态已取消：不再随请求变化，统一 private
+        noteMapper.updateNoteFields(noteId, userId, title, content, STATUS_PRIVATE);
 
         if (request.tagIds() != null) {
             bindTags(userId, noteId, request.tagIds());
@@ -159,14 +159,15 @@ public class NoteServiceImpl implements NoteService {
      * <p>total 必须单独 COUNT：LIMIT 之后拿到的是当页条数，前端分页器要的是总条数，
      * 拿当页条数算页数永远只有一页。</p>
      */
-    private Result pagedNotes(long userId, int deleted, String keywordPattern, String status,
-                              Long tagId, int page, int size) {
-        long total = noteMapper.countNotes(userId, deleted, keywordPattern, status, tagId);
+    private Result pagedNotes(long userId, int deleted, String keywordPattern, Long folderId,
+                              List<Long> tagIds, boolean untagged, int page, int size) {
+        long total = noteMapper.countNotes(userId, deleted, keywordPattern, folderId, tagIds, untagged);
 
         int limit = normalizeSize(size);
         int offset = (normalizePage(page) - 1) * limit;
 
-        List<Note> rows = noteMapper.selectNotes(userId, deleted, keywordPattern, status, tagId, limit, offset);
+        List<Note> rows = noteMapper.selectNotes(
+                userId, deleted, keywordPattern, folderId, tagIds, untagged, limit, offset);
 
         // 当页笔记的标签一次查回来，避免每条笔记再查一次（N+1）
         Map<Long, List<TagBrief>> tagsByNote = loadTags(userId, rows.stream().map(Note::getId).toList());
@@ -264,22 +265,6 @@ public class NoteServiceImpl implements NoteService {
             return trimmed.substring(0, trimmed.offsetByCodePoints(0, MAX_TITLE_LENGTH));
         }
         return trimmed;
-    }
-
-    /** status 只认 draft / private，其余（含 null、乱传的字符串）一律按 private 落库 */
-    private static String normalizeStatusForWrite(String status) {
-        return STATUS_DRAFT.equals(status) ? STATUS_DRAFT : STATUS_PRIVATE;
-    }
-
-    /** 查询条件里的 status：认不出来就当没传，别把「全部」变成「一条都没有」 */
-    private static String normalizeStatusFilter(String status) {
-        if (STATUS_DRAFT.equals(status)) {
-            return STATUS_DRAFT;
-        }
-        if (STATUS_PRIVATE.equals(status)) {
-            return STATUS_PRIVATE;
-        }
-        return null;
     }
 
     /**

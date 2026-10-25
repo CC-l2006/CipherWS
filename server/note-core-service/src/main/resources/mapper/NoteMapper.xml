@@ -23,7 +23,12 @@
     <!--
       列表 / 回收站共用的筛选条件。
       deleted 由调用方决定：0 = 正常列表，1 = 回收站。
-      其余三项为 null 表示不筛，对应动态 SQL 里的 <if>。
+      keywordPattern / folderId / tagIds / untagged 为空或 false 表示不筛。
+
+      三个筛选之间的关系是「且」：
+        folderId  笔记必须带该文件夹绑定的标签之一（文件夹属于当前用户）
+        tagIds    笔记必须带其中任意一个标签（多选标签是 OR）
+        untagged  笔记一个标签都没有
     -->
     <sql id="noteListConditions">
         <where>
@@ -32,13 +37,26 @@
             <if test="keywordPattern != null">
                 AND (n.`title` LIKE #{keywordPattern} OR n.`content` LIKE #{keywordPattern})
             </if>
-            <if test="status != null">
-                AND n.`status` = #{status}
+            <if test="folderId != null">
+                AND EXISTS (SELECT 1
+                            FROM `note_folder_tag` ft
+                                     JOIN `note_folder` f
+                                          ON f.`id` = ft.`folder_id` AND f.`user_id` = #{userId}
+                                     JOIN `note_tag_rel` fr ON fr.`tag_id` = ft.`tag_id`
+                            WHERE ft.`folder_id` = #{folderId}
+                              AND fr.`note_id` = n.`id`)
             </if>
-            <if test="tagId != null">
-                <!-- 用 EXISTS 而不是 JOIN：一篇笔记挂多个标签时 JOIN 会把它变成多行 -->
-                AND EXISTS (SELECT 1 FROM `note_tag_rel` r
-                            WHERE r.`note_id` = n.`id` AND r.`tag_id` = #{tagId})
+            <if test="tagIds != null and tagIds.size() > 0">
+                AND EXISTS (SELECT 1
+                            FROM `note_tag_rel` tr
+                            WHERE tr.`note_id` = n.`id`
+                              AND tr.`tag_id` IN
+                            <foreach item="tid" collection="tagIds" open="(" separator="," close=")">
+                                #{tid}
+                            </foreach>)
+            </if>
+            <if test="untagged">
+                AND NOT EXISTS (SELECT 1 FROM `note_tag_rel` ur WHERE ur.`note_id` = n.`id`)
             </if>
         </where>
     </sql>

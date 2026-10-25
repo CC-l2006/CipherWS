@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<!--
+  文件夹与「文件夹-标签绑定」的映射。
+
+  文件夹不直接装笔记：绑定标签后，带这些标签的笔记自动归入。
+  所以这里没有 note-folder 关联表，只有 note_folder_tag。
+
+  查询返回 resultType="map" 的地方，key 是原始列名（下划线）。
+-->
+<mapper namespace="org.example.cipherws.note.core.mapper.FolderMapper">
+
+    <select id="selectFolders" resultType="map">
+        SELECT `id`, `name`, `created_at`
+        FROM `note_folder`
+        WHERE `user_id` = #{userId}
+        ORDER BY `created_at` ASC, `id` ASC
+    </select>
+
+    <!-- t.user_id 再兜一层：即使绑定表里混入别人的标签也读不出来 -->
+    <select id="selectFolderTagRows" resultType="map">
+        SELECT ft.`folder_id` AS `folder_id`,
+               ft.`tag_id`    AS `tag_id`,
+               t.`name`       AS `tag_name`
+        FROM `note_folder_tag` ft
+                 JOIN `note_tag` t ON t.`id` = ft.`tag_id`
+        WHERE t.`user_id` = #{userId}
+        ORDER BY ft.`folder_id`, t.`id`
+    </select>
+
+    <!--
+      每个文件夹的笔记数：从「文件夹绑定的标签」->「笔记-标签关联」->「笔记」。
+      用 COUNT(DISTINCT n.id)：一篇笔记同时带两个绑定标签时只算一次。
+      n.user_id 与 n.deleted 都卡住，回收站里的不计。
+    -->
+    <select id="countNotesByFolder" resultType="map">
+        SELECT f.`id`             AS `folder_id`,
+               COUNT(DISTINCT n.`id`) AS `note_count`
+        FROM `note_folder` f
+                 LEFT JOIN `note_folder_tag` ft ON ft.`folder_id` = f.`id`
+                 LEFT JOIN `note_tag_rel` r ON r.`tag_id` = ft.`tag_id`
+                 LEFT JOIN `note` n ON n.`id` = r.`note_id`
+                     AND n.`user_id` = f.`user_id`
+                     AND n.`deleted` = 0
+        WHERE f.`user_id` = #{userId}
+        GROUP BY f.`id`
+    </select>
+
+    <select id="countOwnedFolder" resultType="long">
+        SELECT COUNT(*) FROM `note_folder` WHERE `id` = #{folderId} AND `user_id` = #{userId}
+    </select>
+
+    <insert id="insertFolder" parameterType="NoteFolder" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO `note_folder` (`user_id`, `name`) VALUES (#{userId}, #{name})
+    </insert>
+
+    <update id="updateFolderName">
+        UPDATE `note_folder` SET `name` = #{name} WHERE `id` = #{folderId} AND `user_id` = #{userId}
+    </update>
+
+    <delete id="deleteFolder">
+        DELETE FROM `note_folder` WHERE `id` = #{folderId} AND `user_id` = #{userId}
+    </delete>
+
+    <delete id="deleteFolderTags">
+        DELETE FROM `note_folder_tag` WHERE `folder_id` = #{folderId}
+    </delete>
+
+    <insert id="insertFolderTag">
+        INSERT INTO `note_folder_tag` (`folder_id`, `tag_id`)
+        SELECT #{folderId}, `id` FROM `note_tag`
+        WHERE `id` = #{tagId} AND `user_id` = #{userId}
+    </insert>
+
+</mapper>

@@ -71,6 +71,14 @@ export const tagApi = {
   remove: (id) => request(`/tags/${id}`, { method: 'DELETE' })
 }
 
+/* ---------------- 文件夹（绑定标签，笔记按标签自动归入） ---------------- */
+export const folderApi = {
+  list: () => request('/folders'),
+  create: (body) => request('/folders', { method: 'POST', body }),
+  update: (id, body) => request(`/folders/${id}`, { method: 'PUT', body }),
+  remove: (id) => request(`/folders/${id}`, { method: 'DELETE' })
+}
+
 /* ---------------- AI 总结 ---------------- */
 export const aiApi = {
   summarize: (noteId) => request('/ai/summary', { method: 'POST', body: { noteId } }),

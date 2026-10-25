@@ -33,11 +33,11 @@ spring:
               filters:
                 - StripPrefix=1
 
-            # 笔记与标签
+            # 笔记、标签与文件夹
             - id: note-core-service
               uri: lb://note-core-service
               predicates:
-                - Path=/api/notes/**,/api/tags/**
+                - Path=/api/notes/**,/api/tags/**,/api/folders/**
               filters:
                 - StripPrefix=1
 
