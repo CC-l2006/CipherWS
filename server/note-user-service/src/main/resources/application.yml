@@ -75,7 +75,8 @@ note:
   jwt:
     # 必须与 note-gateway 的配置一致，否则网关验不过这里签发的 token
     secret: ${NOTE_JWT_SECRET:cipherws-note-dev-secret-change-me-in-production-32bytes}
-    ttl-seconds: ${NOTE_JWT_TTL:7200}
+    # 默认 30 天（2592000 秒）：登录后一个月内不需要重新登录
+    ttl-seconds: ${NOTE_JWT_TTL:2592000}
 
 management:
   endpoints:

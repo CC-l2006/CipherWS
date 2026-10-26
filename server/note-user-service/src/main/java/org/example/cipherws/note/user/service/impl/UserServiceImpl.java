@@ -121,7 +121,7 @@ public class UserServiceImpl implements UserService {
     @Value("${note.jwt.secret}")
     private String jwtSecret;
 
-    @Value("${note.jwt.ttl-seconds:7200}")
+    @Value("${note.jwt.ttl-seconds:2592000}")
     private long jwtTtlSeconds;
 
     public UserServiceImpl(UserMapper userMapper, MailService mailService, AvatarService avatarService) {
