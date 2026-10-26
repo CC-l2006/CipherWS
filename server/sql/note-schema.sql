@@ -1,7 +1,7 @@
 -- =============================================================================
 -- CipherWS 笔记系统 —— MySQL 建表脚本
 --
--- 对应 frontend/note/需求文档.md 第 5 节的 9 张表；另加 2 张文件夹表（10、11）。
+-- 对应 frontend/note/需求文档.md 第 5 节的 9 张表；另加 1 张文件夹表（10）。
 -- 字符集统一 utf8mb4（笔记正文会含 emoji 与中日文，utf8 存不下），
 -- 存储引擎 InnoDB（需要事务与外键式的一致性）。
 --
@@ -73,9 +73,10 @@ CREATE TABLE IF NOT EXISTS `note_user` (
 CREATE TABLE IF NOT EXISTS `note` (
     `id`          BIGINT      NOT NULL AUTO_INCREMENT COMMENT '笔记 ID',
     `user_id`     BIGINT      NOT NULL COMMENT '所属用户',
+    `folder_id`   BIGINT      NULL COMMENT '所属文件夹，NULL 表示未分类',
     `title`       VARCHAR(80) NOT NULL DEFAULT '无标题笔记' COMMENT '标题',
     `content`     MEDIUMTEXT  NULL COMMENT '正文，富文本/纯文本',
-    `status`      VARCHAR(16) NOT NULL DEFAULT 'private' COMMENT '状态：draft 草稿 / private 私有已发布',
+    `status`      VARCHAR(16) NOT NULL DEFAULT 'private' COMMENT '状态：统一 private（草稿/发布已取消）',
     `deleted`     TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '是否在回收站',
     `flagged`     TINYINT(1)  NOT NULL DEFAULT 0 COMMENT '管理员是否标记违规',
     `deleted_at`  DATETIME    NULL COMMENT '进入回收站的时间',
@@ -84,6 +85,8 @@ CREATE TABLE IF NOT EXISTS `note` (
     PRIMARY KEY (`id`),
     -- 列表页恒按「用户 + 未删除 + 更新时间倒序」查，这条组合索引直接覆盖
     KEY `idx_note_user_deleted_updated` (`user_id`, `deleted`, `updated_at`),
+    -- 按文件夹筛选 / 统计文件夹笔记数
+    KEY `idx_note_folder` (`user_id`, `folder_id`, `deleted`),
     -- 管理员巡检按违规筛选
     KEY `idx_note_flagged` (`flagged`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '笔记表';
@@ -202,7 +205,8 @@ CREATE TABLE IF NOT EXISTS `note_ai_config` (
 
 -- -----------------------------------------------------------------------------
 -- 10. note_folder 文件夹表
---     文件夹不直接装笔记，而是绑定标签；带这些标签的笔记自动归入。
+--     笔记通过 note.folder_id 直接归入文件夹；文件夹本身不绑定标签。
+--     「自动整理」时按「文件夹名 = 标签名」把未分类笔记放进来。
 --     唯一键 (user_id, name)：同一用户不能有同名文件夹。
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `note_folder` (
@@ -213,20 +217,6 @@ CREATE TABLE IF NOT EXISTS `note_folder` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_folder_user_name` (`user_id`, `name`)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '笔记文件夹表';
-
--- -----------------------------------------------------------------------------
--- 11. note_folder_tag 文件夹-标签绑定表
---     一个文件夹可绑多个标签，一个标签也可被多个文件夹使用。
---     两个外键都是 ON DELETE CASCADE：删文件夹 / 删标签都会自动解除绑定。
--- -----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `note_folder_tag` (
-    `folder_id` BIGINT NOT NULL,
-    `tag_id`    BIGINT NOT NULL,
-    PRIMARY KEY (`folder_id`, `tag_id`),
-    KEY `idx_folder_tag_tag` (`tag_id`),
-    CONSTRAINT `fk_folder_tag_folder` FOREIGN KEY (`folder_id`) REFERENCES `note_folder` (`id`) ON DELETE CASCADE,
-    CONSTRAINT `fk_folder_tag_tag` FOREIGN KEY (`tag_id`) REFERENCES `note_tag` (`id`) ON DELETE CASCADE
-) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COMMENT = '文件夹-标签绑定表';
 
 -- =============================================================================
 -- 初始化数据

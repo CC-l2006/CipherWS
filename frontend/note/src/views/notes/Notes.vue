@@ -13,7 +13,7 @@
         <AppButton variant="primary" size="sm" @click="createNote">新笔记</AppButton>
       </div>
 
-      <!-- 文件夹：绑定标签，带这些标签的笔记自动归入 -->
+      <!-- 文件夹：笔记直接归入；自动整理按同名标签归类 -->
       <div class="folders" :style="{ height: foldersHeight + 'px' }">
         <div class="folders__head">
           <span>文件夹</span>
@@ -76,8 +76,8 @@
           <button
             type="button"
             class="folder"
-            :class="{ 'is-active': selectedFolder === 'untagged' }"
-            @click="selectedFolder = 'untagged'"
+            :class="{ 'is-active': selectedFolder === 'unfiled' }"
+            @click="selectedFolder = 'unfiled'"
           >
             未分类
           </button>
@@ -101,6 +101,16 @@
             </button>
           </div>
         </div>
+
+        <button
+          type="button"
+          class="folders__auto"
+          :disabled="organizing"
+          title="把未分类笔记按同名标签自动放进文件夹"
+          @click="autoOrganize"
+        >
+          {{ organizing ? '整理中…' : '自动整理' }}
+        </button>
       </div>
 
       <!-- 文件夹区与笔记列表的上下分界，拖动调整高度，双击复位 -->
@@ -162,6 +172,7 @@
             <span class="item__snippet">{{ snippet(n.content) }}</span>
             <span class="item__meta">
               <span class="item__time">{{ relTime(n.updatedAt) }}</span>
+              <span v-if="folderName(n.folderId)" class="item__folder">{{ folderName(n.folderId) }}</span>
               <span v-if="n.tags?.length" class="item__tags">
                 <AppTag v-for="t in n.tags" :key="t.id" tone="accent">{{ t.name }}</AppTag>
               </span>
@@ -455,7 +466,7 @@
       </template>
     </AppModal>
 
-    <!-- 新建 / 编辑文件夹：文件夹绑定标签，笔记按标签自动归入 -->
+    <!-- 新建 / 编辑文件夹：文件夹只是存放笔记，不绑定标签 -->
     <AppModal
       v-model="folderModalOpen"
       :title="folderForm.id ? '编辑文件夹' : '新建文件夹'"
@@ -468,14 +479,7 @@
         :maxlength="20"
         required
       />
-      <p class="folder-hint">勾选标签后，带这些标签的笔记会自动归入。</p>
-      <div class="tag-picker">
-        <label v-for="t in tags" :key="t.id" class="tag-picker__item">
-          <input v-model="folderForm.tagIds" type="checkbox" :value="t.id" />
-          <span>{{ t.name }}</span>
-        </label>
-        <p v-if="!tags.length" class="tag-picker__empty">还没有标签，先去「标签」页新建</p>
-      </div>
+      <p class="folder-hint">文件夹只用来存放笔记；点「自动整理」会把未分类笔记按同名标签放进来。</p>
       <template #footer>
         <AppButton v-if="folderForm.id" variant="danger" @click="deleteFolder">删除</AppButton>
         <span class="modal-spacer" />
@@ -484,11 +488,22 @@
       </template>
     </AppModal>
 
-    <!-- 左滑「移动」：选一个文件夹，笔记会补上该文件夹绑定的标签 -->
+    <!-- 左滑「移动」：直接放进文件夹，不要求文件夹绑定标签 -->
     <AppModal v-model="moveOpen" title="移动到文件夹" width="440px">
       <p v-if="moveTarget" class="move-note">《{{ moveTarget.title || '无标题笔记' }}》</p>
-      <p v-if="!folders.length" class="move-empty">还没有文件夹，先在左侧「＋」新建一个并绑定标签</p>
+      <p v-if="!folders.length" class="move-empty">还没有文件夹，先在左侧「＋」新建一个</p>
       <div v-else class="move-list">
+        <button
+          type="button"
+          class="move-folder"
+          :class="{ 'is-in': !moveTarget?.folderId }"
+          :disabled="moving"
+          @click="moveToFolder(null)"
+        >
+          <span class="move-folder__name">未分类</span>
+          <span class="move-folder__tags">不属于任何文件夹</span>
+          <span v-if="!moveTarget?.folderId" class="move-folder__badge">已在</span>
+        </button>
         <button
           v-for="f in folders"
           :key="f.id"
@@ -499,9 +514,7 @@
           @click="moveToFolder(f)"
         >
           <span class="move-folder__name">{{ f.name }}</span>
-          <span class="move-folder__tags">
-            {{ f.tagNames.length ? f.tagNames.join('、') : '未绑定标签' }}
-          </span>
+          <span class="move-folder__tags">{{ f.noteCount }} 篇笔记</span>
           <span v-if="folderHasNote(f)" class="move-folder__badge">已在</span>
         </button>
       </div>
@@ -535,7 +548,7 @@ const notes = ref([])
 const listLoading = ref(false)
 const keyword = ref('')
 const folders = ref([])
-/** 'all' | 'untagged' | 文件夹 id */
+/** 'all' | 'unfiled' | 文件夹 id */
 const selectedFolder = ref('all')
 /** 多选的标签筛选，和文件夹条件取交集 */
 const tagFilter = ref([])
@@ -596,7 +609,7 @@ async function loadList() {
       keyword: keyword.value.trim() || undefined,
       folderId: typeof selectedFolder.value === 'number' ? selectedFolder.value : undefined,
       tagIds: tagFilter.value.length ? tagFilter.value.join(',') : undefined,
-      untagged: selectedFolder.value === 'untagged' ? true : undefined
+      unfiled: selectedFolder.value === 'unfiled' ? true : undefined
     })
     notes.value = data
   } catch (err) {
@@ -693,40 +706,35 @@ function openMove(n) {
   moveOpen.value = true
 }
 
+function folderName(id) {
+  if (!id) return ''
+  return folders.value.find((f) => f.id === id)?.name || ''
+}
+
 function folderHasNote(folder) {
-  const ids = new Set((moveTarget.value?.tags || []).map((t) => t.id))
-  return (folder.tagIds || []).some((id) => ids.has(id))
+  return moveTarget.value?.folderId === folder.id
 }
 
 async function moveToFolder(folder) {
   if (!moveTarget.value || moving.value) return
-  if (!folder.tagIds?.length) {
-    toast.warn('这个文件夹还没有绑定标签，无法归入笔记')
+  const folderId = folder?.id ?? null
+  if (folderId === (moveTarget.value.folderId ?? null)) {
+    moveOpen.value = false
     return
   }
   moving.value = true
   try {
     const noteId = moveTarget.value.id
-    await noteApi.move(noteId, folder.id)
+    await noteApi.move(noteId, folderId)
 
     const target = notes.value.find((n) => n.id === noteId)
-    if (target) {
-      const have = new Set((target.tags || []).map((t) => t.id))
-      const added = folder.tagIds
-        .filter((id) => !have.has(id))
-        .map((id) => ({ id, name: tags.value.find((t) => t.id === id)?.name || '' }))
-      target.tags = [...(target.tags || []), ...added]
-    }
-    if (draft.value?.id === noteId) {
-      const ids = new Set(draft.value.tagIds)
-      folder.tagIds.forEach((id) => ids.add(id))
-      draft.value.tagIds = [...ids]
-    }
+    if (target) target.folderId = folderId
+    if (draft.value?.id === noteId) draft.value.folderId = folderId
 
     await loadFolders()
     await loadList()
     moveOpen.value = false
-    toast.success(`已归入「${folder.name}」`)
+    toast.success(folder ? `已移到「${folder.name}」` : '已移到未分类')
   } catch (err) {
     toast.error(err.message)
   } finally {
@@ -757,6 +765,24 @@ async function loadFolders() {
     folders.value = data
   } catch (err) {
     toast.error(err.message)
+  }
+}
+
+/** 自动整理：只处理未分类笔记，按「文件夹名 = 标签名」归入 */
+const organizing = ref(false)
+async function autoOrganize() {
+  if (organizing.value) return
+  organizing.value = true
+  try {
+    const { data } = await folderApi.autoOrganize()
+    await loadFolders()
+    await loadList()
+    if (data > 0) toast.success(`已自动整理 ${data} 篇笔记`)
+    else toast.info('没有可整理的未分类笔记（文件夹名和标签名要相同）')
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    organizing.value = false
   }
 }
 
@@ -808,12 +834,11 @@ async function createTagInline() {
 
 const folderModalOpen = ref(false)
 const folderSaving = ref(false)
-const folderForm = reactive({ id: null, name: '', tagIds: [] })
+const folderForm = reactive({ id: null, name: '' })
 
 function openFolderForm(folder = null) {
   folderForm.id = folder?.id ?? null
   folderForm.name = folder?.name ?? ''
-  folderForm.tagIds = folder ? [...folder.tagIds] : []
   folderModalOpen.value = true
 }
 
@@ -825,7 +850,7 @@ async function saveFolder() {
   }
   folderSaving.value = true
   try {
-    const body = { name, tagIds: folderForm.tagIds }
+    const body = { name }
     if (folderForm.id) await folderApi.update(folderForm.id, body)
     else await folderApi.create(body)
     await loadFolders()
@@ -841,7 +866,7 @@ async function saveFolder() {
 
 async function deleteFolder() {
   if (!folderForm.id) return
-  if (!window.confirm(`删除文件夹「${folderForm.name}」？笔记和标签都不会被删除。`)) return
+  if (!window.confirm(`删除文件夹「${folderForm.name}」？里面的笔记会回到未分类，不会被删除。`)) return
   try {
     const id = folderForm.id
     await folderApi.remove(id)
@@ -1978,6 +2003,29 @@ onBeforeUnmount(() => {
   overflow-y: auto;
 }
 
+.folders__auto {
+  flex: none;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border: 1px dashed var(--rule-strong);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-3);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.folders__auto:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.folders__auto:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
 .folder {
   width: 100%;
   padding: 5px var(--sp-2);
@@ -2282,6 +2330,16 @@ onBeforeUnmount(() => {
 .item__time {
   font-size: var(--fs-xs);
   color: var(--ink-3);
+}
+
+.item__folder {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--paper-deep);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
 }
 
 .item__tags {

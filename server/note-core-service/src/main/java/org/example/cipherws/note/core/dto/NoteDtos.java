@@ -22,6 +22,7 @@ public final class NoteDtos {
     /** 笔记列表项，字段与 frontend/note/src/api/index.js 的 noteApi 一致 */
     public record NoteVo(
             Long id,
+            Long folderId,
             String title,
             String content,
             String status,
@@ -38,6 +39,7 @@ public final class NoteDtos {
     /** 详情 = 列表项 + 该笔记的 AI 总结历史 */
     public record NoteDetailVo(
             Long id,
+            Long folderId,
             String title,
             String content,
             String status,
@@ -53,21 +55,14 @@ public final class NoteDtos {
     }
 
     /**
-     * 文件夹列表项。
-     *
-     * <p>{@code tagIds / tagNames} 是绑定的标签，{@code noteCount} 是按这些标签
-     * 自动归入该文件夹的未删除笔记数（去重）。</p>
+     * 文件夹列表项。文件夹只是存放笔记的容器，不再绑定标签；
+     * noteCount 是通过 note.folder_id 归入的文件数。
      */
-    public record FolderVo(
-            Long id,
-            String name,
-            List<Long> tagIds,
-            List<String> tagNames,
-            Long noteCount) {
+    public record FolderVo(Long id, String name, Long noteCount) {
     }
 
-    /** 新建 / 编辑文件夹：名字 + 要绑定的标签 */
-    public record FolderSaveRequest(String name, List<Long> tagIds) {
+    /** 新建 / 编辑文件夹：只要一个名字 */
+    public record FolderSaveRequest(String name) {
     }
 
     /** 新建 / 更新笔记的请求体；更新时字段为 null 表示「这一项不改」 */

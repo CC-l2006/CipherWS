@@ -20,7 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
  * 文件夹接口：路径与 frontend/note/src/api/index.js 的 folderApi 一一对应。
  * 网关已剥掉 /api 前缀，所以这里直接映射 /folders。
  *
- * <p>文件夹不装笔记，只绑定标签；笔记按标签自动归入。</p>
+ * <p>文件夹只是存放笔记的容器，笔记通过 note.folder_id 直接归入；
+ * 「自动整理」按「文件夹名 = 标签名」处理未分类笔记。</p>
  */
 @RestController
 @RequestMapping("/folders")
@@ -55,6 +56,13 @@ public class FolderController {
                                @RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId,
                                @RequestHeader(value = Auth.HEADER_USER_ROLE, required = false) String role) {
         return folderService.removeFolder(requireLogin(userId), id);
+    }
+
+    /** 按「文件夹名 = 标签名」自动整理未分类笔记 */
+    @PostMapping("/auto-organize")
+    public Result autoOrganize(@RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId,
+                               @RequestHeader(value = Auth.HEADER_USER_ROLE, required = false) String role) {
+        return folderService.autoOrganize(requireLogin(userId));
     }
 
     private static long requireLogin(Long userId) {

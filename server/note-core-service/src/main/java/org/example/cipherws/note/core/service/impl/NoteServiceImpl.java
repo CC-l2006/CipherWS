@@ -61,10 +61,10 @@ public class NoteServiceImpl implements NoteService {
 
     @Override
     public Result listNotes(long userId, String keyword, Long folderId, List<Long> tagIds,
-                            boolean untagged, int page, int size) {
+                            boolean unfiled, int page, int size) {
         // LIKE 的 % / _ 转义留在这一层：占位符已经防了注入，这里防的是「搜 100% 却什么都命中」
         String like = likePattern(keyword);
-        return pagedNotes(userId, NOT_DELETED, like, folderId, tagIds, untagged, page, size);
+        return pagedNotes(userId, NOT_DELETED, like, folderId, tagIds, unfiled, page, size);
     }
 
     @Override
@@ -90,8 +90,8 @@ public class NoteServiceImpl implements NoteService {
         List<SummaryVo> summaries = noteMapper.selectSummaries(noteId, userId).stream()
                 .map(NoteServiceImpl::toSummaryVo)
                 .toList();
-        NoteDetailVo detail = new NoteDetailVo(note.id(), note.title(), note.content(), note.status(),
-                note.flagged(), note.createdAt(), note.updatedAt(), note.tags(), summaries);
+        NoteDetailVo detail = new NoteDetailVo(note.id(), note.folderId(), note.title(), note.content(),
+                note.status(), note.flagged(), note.createdAt(), note.updatedAt(), note.tags(), summaries);
         return Result.ok(detail);
     }
 
@@ -134,25 +134,17 @@ public class NoteServiceImpl implements NoteService {
     }
 
     /**
-     * 归入文件夹：文件夹本质是「一组标签」，所以移动 = 把文件夹绑定的标签补到笔记上。
-     * 不覆盖笔记原有的其他标签，也不动正文；重复的关联由 INSERT IGNORE 跳过。
+     * 放进文件夹：只改 note.folder_id，不碰正文和标签。
+     * folderId 传 null 表示移出到「未分类」。
      */
     @Override
     @Transactional
     public Result moveToFolder(long userId, long noteId, Long folderId) {
-        if (folderId == null) {
-            throw new BusinessException("请选择要移动到的文件夹");
-        }
         requireNoteVo(userId, noteId);
-        if (folderMapper.countOwnedFolder(folderId, userId) == 0) {
+        if (folderId != null && folderMapper.countOwnedFolder(folderId, userId) == 0) {
             throw new BusinessException("文件夹不存在");
         }
-        if (folderMapper.selectFolderTagIds(folderId, userId).isEmpty()) {
-            throw new BusinessException("该文件夹还没有绑定标签，无法归入笔记");
-        }
-        noteMapper.addFolderTagRelations(noteId, folderId, userId);
-        // 归入后让这篇排到列表最前
-        noteMapper.updateNoteFields(noteId, userId, null, null, null);
+        noteMapper.updateNoteFolder(noteId, userId, folderId);
         return Result.ok(true);
     }
 
@@ -186,14 +178,14 @@ public class NoteServiceImpl implements NoteService {
      * 拿当页条数算页数永远只有一页。</p>
      */
     private Result pagedNotes(long userId, int deleted, String keywordPattern, Long folderId,
-                              List<Long> tagIds, boolean untagged, int page, int size) {
-        long total = noteMapper.countNotes(userId, deleted, keywordPattern, folderId, tagIds, untagged);
+                              List<Long> tagIds, boolean unfiled, int page, int size) {
+        long total = noteMapper.countNotes(userId, deleted, keywordPattern, folderId, tagIds, unfiled);
 
         int limit = normalizeSize(size);
         int offset = (normalizePage(page) - 1) * limit;
 
         List<Note> rows = noteMapper.selectNotes(
-                userId, deleted, keywordPattern, folderId, tagIds, untagged, limit, offset);
+                userId, deleted, keywordPattern, folderId, tagIds, unfiled, limit, offset);
 
         // 当页笔记的标签一次查回来，避免每条笔记再查一次（N+1）
         Map<Long, List<TagBrief>> tagsByNote = loadTags(userId, rows.stream().map(Note::getId).toList());
@@ -263,6 +255,7 @@ public class NoteServiceImpl implements NoteService {
     private static NoteVo toNoteVo(Note note, List<TagBrief> tags) {
         return new NoteVo(
                 note.getId(),
+                note.getFolderId(),
                 note.getTitle(),
                 note.getContent(),
                 note.getStatus(),

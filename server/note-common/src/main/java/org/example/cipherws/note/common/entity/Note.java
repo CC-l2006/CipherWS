@@ -9,9 +9,11 @@ import java.time.LocalDateTime;
 public class Note {
     private Long id;
     private Long userId;
+    /** 所属文件夹；null 表示未分类 */
+    private Long folderId;
     private String title;
     private String content;
-    /** draft 草稿 / private 私有 */
+    /** 统一 private（草稿/发布已取消） */
     private String status;
     private Boolean deleted;
     private Boolean flagged;

@@ -17,18 +17,18 @@
 
     <!-- 列表与详情共用的列，避免两处 select 的字段悄悄跑偏 -->
     <sql id="noteColumns">
-        n.`id`, n.`title`, n.`content`, n.`status`, n.`flagged`, n.`created_at`, n.`updated_at`
+        n.`id`, n.`folder_id`, n.`title`, n.`content`, n.`status`, n.`flagged`, n.`created_at`, n.`updated_at`
     </sql>
 
     <!--
       列表 / 回收站共用的筛选条件。
       deleted 由调用方决定：0 = 正常列表，1 = 回收站。
-      keywordPattern / folderId / tagIds / untagged 为空或 false 表示不筛。
+      keywordPattern / folderId / tagIds / unfiled 为空或 false 表示不筛。
 
       三个筛选之间的关系是「且」：
-        folderId  笔记必须带该文件夹绑定的标签之一（文件夹属于当前用户）
+        folderId  笔记直接放在该文件夹里（note.folder_id）
         tagIds    笔记必须带其中任意一个标签（多选标签是 OR）
-        untagged  笔记一个标签都没有
+        unfiled   笔记没有文件夹
     -->
     <sql id="noteListConditions">
         <where>
@@ -38,13 +38,7 @@
                 AND (n.`title` LIKE #{keywordPattern} OR n.`content` LIKE #{keywordPattern})
             </if>
             <if test="folderId != null">
-                AND EXISTS (SELECT 1
-                            FROM `note_folder_tag` ft
-                                     JOIN `note_folder` f
-                                          ON f.`id` = ft.`folder_id` AND f.`user_id` = #{userId}
-                                     JOIN `note_tag_rel` fr ON fr.`tag_id` = ft.`tag_id`
-                            WHERE ft.`folder_id` = #{folderId}
-                              AND fr.`note_id` = n.`id`)
+                AND n.`folder_id` = #{folderId}
             </if>
             <if test="tagIds != null and tagIds.size() > 0">
                 AND EXISTS (SELECT 1
@@ -55,8 +49,8 @@
                                 #{tid}
                             </foreach>)
             </if>
-            <if test="untagged">
-                AND NOT EXISTS (SELECT 1 FROM `note_tag_rel` ur WHERE ur.`note_id` = n.`id`)
+            <if test="unfiled">
+                AND n.`folder_id` IS NULL
             </if>
         </where>
     </sql>
@@ -168,21 +162,13 @@
         SELECT #{noteId}, `id` FROM `note_tag` WHERE `id` = #{tagId} AND `user_id` = #{userId}
     </insert>
 
-    <!--
-      归入文件夹：把文件夹绑定的标签批量补到笔记上。
-      - INSERT IGNORE：已经有同名标签关联时跳过，不报主键冲突
-      - JOIN note_folder 卡 user_id：别人的文件夹归不进来
-      - EXISTS note：笔记也必须是当前用户的
-    -->
-    <insert id="addFolderTagRelations">
-        INSERT IGNORE INTO `note_tag_rel` (`note_id`, `tag_id`)
-        SELECT #{noteId}, ft.`tag_id`
-        FROM `note_folder_tag` ft
-                 JOIN `note_folder` f ON f.`id` = ft.`folder_id` AND f.`user_id` = #{userId}
-                 JOIN `note_tag` t ON t.`id` = ft.`tag_id` AND t.`user_id` = #{userId}
-        WHERE ft.`folder_id` = #{folderId}
-          AND EXISTS (SELECT 1 FROM `note` n WHERE n.`id` = #{noteId} AND n.`user_id` = #{userId})
-    </insert>
+    <!-- 归入 / 移出文件夹：只改 folder_id，null 表示未分类 -->
+    <update id="updateNoteFolder">
+        UPDATE `note`
+        SET `folder_id` = #{folderId,jdbcType=BIGINT},
+            `updated_at` = CURRENT_TIMESTAMP
+        WHERE `id` = #{noteId} AND `user_id` = #{userId}
+    </update>
 
     <!--
       note_tag_rel 本身不带 user_id，所以关联到 note_tag 后用 t.user_id 再兜一层，

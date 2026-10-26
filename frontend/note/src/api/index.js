@@ -57,7 +57,7 @@ export const noteApi = {
   detail: (id) => request(`/notes/${id}`),
   create: (body) => request('/notes', { method: 'POST', body }),
   update: (id, body) => request(`/notes/${id}`, { method: 'PUT', body }),
-  /** 把笔记归入文件夹：补上文件夹绑定的标签，不覆盖正文与原有标签 */
+  /** 把笔记放进文件夹；folderId 传 null 表示移出到未分类 */
   move: (id, folderId) => request(`/notes/${id}/move`, { method: 'POST', body: { folderId } }),
   remove: (id, hard = false) => request(`/notes/${id}`, { method: 'DELETE', params: { hard } }),
   restore: (id) => request(`/notes/${id}/restore`, { method: 'POST' }),
@@ -73,12 +73,14 @@ export const tagApi = {
   remove: (id) => request(`/tags/${id}`, { method: 'DELETE' })
 }
 
-/* ---------------- 文件夹（绑定标签，笔记按标签自动归入） ---------------- */
+/* ---------------- 文件夹（笔记直接归入；自动整理按同名标签） ---------------- */
 export const folderApi = {
   list: () => request('/folders'),
   create: (body) => request('/folders', { method: 'POST', body }),
   update: (id, body) => request(`/folders/${id}`, { method: 'PUT', body }),
-  remove: (id) => request(`/folders/${id}`, { method: 'DELETE' })
+  remove: (id) => request(`/folders/${id}`, { method: 'DELETE' }),
+  /** 把未分类笔记按「文件夹名 = 标签名」自动归入，返回归类数量 */
+  autoOrganize: () => request('/folders/auto-organize', { method: 'POST' })
 }
 
 /* ---------------- AI 总结 ---------------- */

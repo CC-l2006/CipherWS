@@ -17,12 +17,12 @@ public interface NoteService {
     /**
      * 列表页：keyword 同时匹配标题与正文。
      *
-     * @param folderId 只筛该文件夹绑定的标签；null 表示全部
+     * @param folderId 只筛该文件夹里的笔记；null 表示全部
      * @param tagIds   笔记需带其中任意一个标签；空表示不筛
-     * @param untagged 只筛没有任何标签的笔记
+     * @param unfiled  只筛没有文件夹的笔记
      */
     Result listNotes(long userId, String keyword, Long folderId, List<Long> tagIds,
-                     boolean untagged, int page, int size);
+                     boolean unfiled, int page, int size);
 
     /** 回收站：只含 deleted=1 的笔记 */
     Result listTrashNotes(long userId, int page, int size);
@@ -37,7 +37,7 @@ public interface NoteService {
 
     Result updateNote(long userId, long noteId, NoteDtos.NoteSaveRequest request);
 
-    /** 把笔记归入文件夹（补上文件夹绑定的标签），不覆盖原有标签与正文 */
+    /** 把笔记放进文件夹；folderId 为 null 表示移出到未分类。不碰正文和标签 */
     Result moveToFolder(long userId, long noteId, Long folderId);
 
     /** hard=true 永久删除，否则只进回收站 */

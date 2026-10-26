@@ -38,12 +38,12 @@ public class NoteController {
     public Result listNotes(@RequestParam(value = "keyword", required = false) String keyword,
                             @RequestParam(value = "folderId", required = false) Long folderId,
                             @RequestParam(value = "tagIds", required = false) List<Long> tagIds,
-                            @RequestParam(value = "untagged", defaultValue = "false") boolean untagged,
+                            @RequestParam(value = "unfiled", defaultValue = "false") boolean unfiled,
                             @RequestParam(value = "page", defaultValue = "1") int page,
                             @RequestParam(value = "size", defaultValue = "10") int size,
                             @RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId,
                             @RequestHeader(value = Auth.HEADER_USER_ROLE, required = false) String role) {
-        return noteService.listNotes(requireLogin(userId), keyword, folderId, tagIds, untagged, page, size);
+        return noteService.listNotes(requireLogin(userId), keyword, folderId, tagIds, unfiled, page, size);
     }
 
     @GetMapping("/trash")
@@ -82,7 +82,7 @@ public class NoteController {
         return noteService.updateNote(requireLogin(userId), id, request);
     }
 
-    /** 把笔记归入文件夹：补上文件夹绑定的标签，不覆盖正文和原有标签 */
+    /** 把笔记放进文件夹（folderId 为 null 表示移出到未分类），不覆盖正文和标签 */
     @PostMapping("/{id}/move")
     public Result moveNote(@PathVariable("id") long id,
                            @RequestBody(required = false) MoveNoteReq request,

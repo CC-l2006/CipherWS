@@ -13,15 +13,14 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 
 /**
  * 文件夹业务实现。SQL 全部在 FolderMapper.xml。
  *
- * <p>文件夹 = 一组标签。列表里的 noteCount 是把这些标签关联到的笔记去重后的数量，
- * 所以用户改笔记标签时，文件夹内容会自动变化，不需要再点一次「归档」。</p>
+ * <p>文件夹不再绑定标签；笔记通过 note.folder_id 直接归入。
+ * 「自动整理」只处理未分类笔记，按「文件夹名 = 标签名」匹配。</p>
  */
 @Service
 public class FolderServiceImpl implements FolderService {
@@ -53,7 +52,6 @@ public class FolderServiceImpl implements FolderService {
         } catch (DuplicateKeyException e) {
             throw new BusinessException("同名文件夹已存在");
         }
-        bindTags(userId, folder.getId(), request.tagIds());
         return Result.ok(findFolder(userId, folder.getId()));
     }
 
@@ -67,7 +65,6 @@ public class FolderServiceImpl implements FolderService {
         } catch (DuplicateKeyException e) {
             throw new BusinessException("同名文件夹已存在");
         }
-        bindTags(userId, folderId, request.tagIds());
         return Result.ok(findFolder(userId, folderId));
     }
 
@@ -75,30 +72,23 @@ public class FolderServiceImpl implements FolderService {
     @Transactional
     public Result removeFolder(long userId, long folderId) {
         requireOwned(userId, folderId);
-        // note_folder_tag 的两个外键都是 ON DELETE CASCADE，绑定行自动清掉；
-        // 标签与笔记完全不动。
+        // 笔记不删，只退回「未分类」
+        folderMapper.clearFolderNotes(folderId, userId);
         folderMapper.deleteFolder(folderId, userId);
         return Result.ok(true);
     }
 
+    @Override
+    @Transactional
+    public Result autoOrganize(long userId) {
+        int moved = folderMapper.autoOrganize(userId);
+        return Result.ok(moved);
+    }
+
     /* ------------------------------ 内部实现 ------------------------------ */
 
-    /** 文件夹 + 绑定标签 + 笔记数，一次查全，避免每个文件夹再查两次 */
     private List<FolderVo> loadFolders(long userId) {
         List<Map<String, Object>> rows = folderMapper.selectFolders(userId);
-
-        Map<Long, List<Long>> tagIdsByFolder = new HashMap<>();
-        Map<Long, List<String>> tagNamesByFolder = new HashMap<>();
-        for (Map<String, Object> row : folderMapper.selectFolderTagRows(userId)) {
-            Long folderId = toLong(row.get("folder_id"));
-            Long tagId = toLong(row.get("tag_id"));
-            if (folderId == null || tagId == null) {
-                continue;
-            }
-            tagIdsByFolder.computeIfAbsent(folderId, key -> new ArrayList<>()).add(tagId);
-            tagNamesByFolder.computeIfAbsent(folderId, key -> new ArrayList<>())
-                    .add((String) row.get("tag_name"));
-        }
 
         Map<Long, Long> countByFolder = new HashMap<>();
         for (Map<String, Object> row : folderMapper.countNotesByFolder(userId)) {
@@ -118,8 +108,6 @@ public class FolderServiceImpl implements FolderService {
             folders.add(new FolderVo(
                     id,
                     (String) row.get("name"),
-                    tagIdsByFolder.getOrDefault(id, List.of()),
-                    tagNamesByFolder.getOrDefault(id, List.of()),
                     countByFolder.getOrDefault(id, 0L)));
         }
         return folders;
@@ -130,20 +118,6 @@ public class FolderServiceImpl implements FolderService {
                 .filter(folder -> folder.id() != null && folder.id() == folderId)
                 .findFirst()
                 .orElseThrow(() -> new BusinessException("文件夹不存在"));
-    }
-
-    /** 重建绑定：先清空再逐条插入；非本人的标签会被 INSERT ... SELECT 静默忽略 */
-    private void bindTags(long userId, long folderId, List<Long> tagIds) {
-        folderMapper.deleteFolderTags(folderId);
-        if (tagIds == null || tagIds.isEmpty()) {
-            return;
-        }
-        for (Long tagId : new LinkedHashSet<>(tagIds)) {
-            if (tagId == null) {
-                continue;
-            }
-            folderMapper.insertFolderTag(folderId, tagId, userId);
-        }
     }
 
     private void requireOwned(long userId, long folderId) {

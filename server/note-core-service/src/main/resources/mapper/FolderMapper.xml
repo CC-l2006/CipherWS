@@ -3,12 +3,12 @@
         "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
 
 <!--
-  文件夹与「文件夹-标签绑定」的映射。
+  文件夹表映射。
 
-  文件夹不直接装笔记：绑定标签后，带这些标签的笔记自动归入。
-  所以这里没有 note-folder 关联表，只有 note_folder_tag。
+  文件夹不再绑定标签：note.folder_id 直接表示这篇笔记放在哪个文件夹。
+  「自动整理」按「文件夹名 = 标签名」把未分类笔记归入（见 autoOrganize）。
 
-  查询返回 resultType="map" 的地方，key 是原始列名（下划线）。
+  resultType="map" 的地方 key 是原始列名（下划线）。
 -->
 <mapper namespace="org.example.cipherws.note.core.mapper.FolderMapper">
 
@@ -19,29 +19,15 @@
         ORDER BY `created_at` ASC, `id` ASC
     </select>
 
-    <!-- t.user_id 再兜一层：即使绑定表里混入别人的标签也读不出来 -->
-    <select id="selectFolderTagRows" resultType="map">
-        SELECT ft.`folder_id` AS `folder_id`,
-               ft.`tag_id`    AS `tag_id`,
-               t.`name`       AS `tag_name`
-        FROM `note_folder_tag` ft
-                 JOIN `note_tag` t ON t.`id` = ft.`tag_id`
-        WHERE t.`user_id` = #{userId}
-        ORDER BY ft.`folder_id`, t.`id`
-    </select>
-
     <!--
-      每个文件夹的笔记数：从「文件夹绑定的标签」->「笔记-标签关联」->「笔记」。
-      用 COUNT(DISTINCT n.id)：一篇笔记同时带两个绑定标签时只算一次。
+      每个文件夹的笔记数：直接数 note.folder_id，不再经过标签。
       n.user_id 与 n.deleted 都卡住，回收站里的不计。
     -->
     <select id="countNotesByFolder" resultType="map">
-        SELECT f.`id`             AS `folder_id`,
-               COUNT(DISTINCT n.`id`) AS `note_count`
+        SELECT f.`id`                AS `folder_id`,
+               COUNT(n.`id`)         AS `note_count`
         FROM `note_folder` f
-                 LEFT JOIN `note_folder_tag` ft ON ft.`folder_id` = f.`id`
-                 LEFT JOIN `note_tag_rel` r ON r.`tag_id` = ft.`tag_id`
-                 LEFT JOIN `note` n ON n.`id` = r.`note_id`
+                 LEFT JOIN `note` n ON n.`folder_id` = f.`id`
                      AND n.`user_id` = f.`user_id`
                      AND n.`deleted` = 0
         WHERE f.`user_id` = #{userId}
@@ -52,14 +38,6 @@
         SELECT COUNT(*) FROM `note_folder` WHERE `id` = #{folderId} AND `user_id` = #{userId}
     </select>
 
-    <select id="selectFolderTagIds" resultType="long">
-        SELECT ft.`tag_id`
-        FROM `note_folder_tag` ft
-                 JOIN `note_folder` f ON f.`id` = ft.`folder_id`
-        WHERE ft.`folder_id` = #{folderId}
-          AND f.`user_id` = #{userId}
-    </select>
-
     <insert id="insertFolder" parameterType="NoteFolder" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO `note_folder` (`user_id`, `name`) VALUES (#{userId}, #{name})
     </insert>
@@ -68,18 +46,36 @@
         UPDATE `note_folder` SET `name` = #{name} WHERE `id` = #{folderId} AND `user_id` = #{userId}
     </update>
 
+    <!-- 删文件夹前先把笔记退回未分类，笔记本身不删 -->
+    <update id="clearFolderNotes">
+        UPDATE `note` SET `folder_id` = NULL
+        WHERE `folder_id` = #{folderId} AND `user_id` = #{userId}
+    </update>
+
     <delete id="deleteFolder">
         DELETE FROM `note_folder` WHERE `id` = #{folderId} AND `user_id` = #{userId}
     </delete>
 
-    <delete id="deleteFolderTags">
-        DELETE FROM `note_folder_tag` WHERE `folder_id` = #{folderId}
-    </delete>
-
-    <insert id="insertFolderTag">
-        INSERT INTO `note_folder_tag` (`folder_id`, `tag_id`)
-        SELECT #{folderId}, `id` FROM `note_tag`
-        WHERE `id` = #{tagId} AND `user_id` = #{userId}
-    </insert>
+    <!--
+      自动整理：只动未分类（folder_id IS NULL）的笔记。
+      标签名与文件夹名在 utf8mb4_0900_ai_ci 下不区分大小写，
+      所以标签 "java" 会自动进文件夹 "Java"。
+      一篇笔记命中多个文件夹时取 id 最小的那个，保证结果稳定。
+    -->
+    <update id="autoOrganize">
+        UPDATE `note` n
+            JOIN (SELECT n2.`id`      AS `note_id`,
+                         MIN(f.`id`)  AS `folder_id`
+                  FROM `note` n2
+                           JOIN `note_tag_rel` r ON r.`note_id` = n2.`id`
+                           JOIN `note_tag` t ON t.`id` = r.`tag_id` AND t.`user_id` = n2.`user_id`
+                           JOIN `note_folder` f ON f.`user_id` = n2.`user_id` AND f.`name` = t.`name`
+                  WHERE n2.`user_id` = #{userId}
+                    AND n2.`deleted` = 0
+                    AND n2.`folder_id` IS NULL
+                  GROUP BY n2.`id`) m ON m.`note_id` = n.`id`
+        SET n.`folder_id`  = m.`folder_id`,
+            n.`updated_at` = CURRENT_TIMESTAMP
+    </update>
 
 </mapper>

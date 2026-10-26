@@ -32,7 +32,7 @@ public interface NoteMapper {
                     @Param("keywordPattern") String keywordPattern,
                     @Param("folderId") Long folderId,
                     @Param("tagIds") List<Long> tagIds,
-                    @Param("untagged") boolean untagged);
+                    @Param("unfiled") boolean unfiled);
 
     /**
      * 列表 / 回收站共用的翻页查询，按 updated_at DESC, id DESC 排序。
@@ -45,7 +45,7 @@ public interface NoteMapper {
                            @Param("keywordPattern") String keywordPattern,
                            @Param("folderId") Long folderId,
                            @Param("tagIds") List<Long> tagIds,
-                           @Param("untagged") boolean untagged,
+                           @Param("unfiled") boolean unfiled,
                            @Param("limit") int limit,
                            @Param("offset") int offset);
 
@@ -106,12 +106,12 @@ public interface NoteMapper {
                           @Param("userId") long userId);
 
     /**
-     * 把笔记归入文件夹：把该文件夹绑定的所有标签补到笔记上。
-     * 已存在的关联用 INSERT IGNORE 跳过；笔记或文件夹不属于当前用户时插入 0 行。
+     * 把笔记放进文件夹（folderId 为 null 表示移出到未分类）。
+     * 只改 folder_id，不碰正文和标签。
      */
-    int addFolderTagRelations(@Param("noteId") long noteId,
-                              @Param("folderId") long folderId,
-                              @Param("userId") long userId);
+    int updateNoteFolder(@Param("noteId") long noteId,
+                         @Param("userId") long userId,
+                         @Param("folderId") Long folderId);
 
     /**
      * 批量取这批笔记的标签（一次查回来，避免每条笔记再查一次）。
