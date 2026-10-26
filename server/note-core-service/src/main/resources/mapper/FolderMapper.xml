@@ -52,6 +52,14 @@
         SELECT COUNT(*) FROM `note_folder` WHERE `id` = #{folderId} AND `user_id` = #{userId}
     </select>
 
+    <select id="selectFolderTagIds" resultType="long">
+        SELECT ft.`tag_id`
+        FROM `note_folder_tag` ft
+                 JOIN `note_folder` f ON f.`id` = ft.`folder_id`
+        WHERE ft.`folder_id` = #{folderId}
+          AND f.`user_id` = #{userId}
+    </select>
+
     <insert id="insertFolder" parameterType="NoteFolder" useGeneratedKeys="true" keyProperty="id">
         INSERT INTO `note_folder` (`user_id`, `name`) VALUES (#{userId}, #{name})
     </insert>

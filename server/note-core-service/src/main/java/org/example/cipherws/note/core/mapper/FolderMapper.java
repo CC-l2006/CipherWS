@@ -27,6 +27,9 @@ public interface FolderMapper {
     /** 归属校验：别人家的 folderId 一律当作不存在 */
     long countOwnedFolder(@Param("folderId") long folderId, @Param("userId") long userId);
 
+    /** 该文件夹绑定的标签 id；文件夹不属于当前用户时返回空列表 */
+    List<Long> selectFolderTagIds(@Param("folderId") long folderId, @Param("userId") long userId);
+
     /** 插入后会把自增主键写回实体的 id */
     int insertFolder(NoteFolder folder);
 

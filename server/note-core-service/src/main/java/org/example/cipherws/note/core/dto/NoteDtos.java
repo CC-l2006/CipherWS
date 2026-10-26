@@ -74,6 +74,10 @@ public final class NoteDtos {
     public record NoteSaveRequest(String title, String content, String status, List<Long> tagIds) {
     }
 
+    /** 把笔记归入某个文件夹（实际是补上该文件夹绑定的标签） */
+    public record MoveNoteReq(Long folderId) {
+    }
+
     /** 标签请求体，只有名字 */
     public record TagSaveRequest(String name) {
     }

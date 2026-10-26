@@ -4,6 +4,7 @@ import jakarta.annotation.Resource;
 import org.example.cipherws.note.common.exception.BusinessException;
 import org.example.cipherws.note.common.result.Result;
 import org.example.cipherws.note.common.security.Auth;
+import org.example.cipherws.note.core.dto.NoteDtos.MoveNoteReq;
 import org.example.cipherws.note.core.dto.NoteDtos.NoteSaveRequest;
 import org.example.cipherws.note.core.service.NoteService;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -79,6 +80,16 @@ public class NoteController {
                              @RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId,
                              @RequestHeader(value = Auth.HEADER_USER_ROLE, required = false) String role) {
         return noteService.updateNote(requireLogin(userId), id, request);
+    }
+
+    /** 把笔记归入文件夹：补上文件夹绑定的标签，不覆盖正文和原有标签 */
+    @PostMapping("/{id}/move")
+    public Result moveNote(@PathVariable("id") long id,
+                           @RequestBody(required = false) MoveNoteReq request,
+                           @RequestHeader(value = Auth.HEADER_USER_ID, required = false) Long userId,
+                           @RequestHeader(value = Auth.HEADER_USER_ROLE, required = false) String role) {
+        return noteService.moveToFolder(
+                requireLogin(userId), id, request == null ? null : request.folderId());
     }
 
     @DeleteMapping("/{id}")

@@ -120,25 +120,54 @@
           {{ keyword ? '没有匹配的笔记' : '还没有笔记' }}
         </p>
 
-        <button
-          v-for="n in notes"
-          :key="n.id"
-          type="button"
-          class="item"
-          :class="{ 'is-active': n.id === Number(route.params.id) }"
-          @click="openNote(n.id)"
-        >
-          <span class="item__top">
-            <span class="item__title">{{ n.title }}</span>
-          </span>
-          <span class="item__snippet">{{ snippet(n.content) }}</span>
-          <span class="item__meta">
-            <span class="item__time">{{ relTime(n.updatedAt) }}</span>
-            <span v-if="n.tags?.length" class="item__tags">
-              <AppTag v-for="t in n.tags" :key="t.id" tone="accent">{{ t.name }}</AppTag>
+        <div v-for="n in notes" :key="n.id" class="item-wrap">
+          <!-- 左滑露出的操作 -->
+          <div class="item-actions">
+            <button
+              type="button"
+              class="item-action"
+              :tabindex="swipedId === n.id ? 0 : -1"
+              @click.stop="openMove(n)"
+            >
+              移动
+            </button>
+            <button
+              type="button"
+              class="item-action item-action--danger"
+              :tabindex="swipedId === n.id ? 0 : -1"
+              @click.stop="deleteFromList(n)"
+            >
+              删除
+            </button>
+          </div>
+
+          <button
+            type="button"
+            class="item"
+            :class="{
+              'is-active': n.id === Number(route.params.id),
+              'is-swiping': swipe.id === n.id && swipe.dragging
+            }"
+            :style="{ transform: `translateX(${itemOffset(n.id)}px)` }"
+            title="向左滑动可移动或删除"
+            @pointerdown="onSwipeStart($event, n)"
+            @pointermove="onSwipeMove($event, n)"
+            @pointerup="onSwipeEnd($event, n)"
+            @pointercancel="onSwipeEnd($event, n)"
+            @click="onItemClick(n)"
+          >
+            <span class="item__top">
+              <span class="item__title">{{ n.title }}</span>
             </span>
-          </span>
-        </button>
+            <span class="item__snippet">{{ snippet(n.content) }}</span>
+            <span class="item__meta">
+              <span class="item__time">{{ relTime(n.updatedAt) }}</span>
+              <span v-if="n.tags?.length" class="item__tags">
+                <AppTag v-for="t in n.tags" :key="t.id" tone="accent">{{ t.name }}</AppTag>
+              </span>
+            </span>
+          </button>
+        </div>
       </div>
 
       <RouterLink to="/notes/trash" class="list__trash">
@@ -454,6 +483,32 @@
         <AppButton variant="primary" :loading="folderSaving" @click="saveFolder">保存</AppButton>
       </template>
     </AppModal>
+
+    <!-- 左滑「移动」：选一个文件夹，笔记会补上该文件夹绑定的标签 -->
+    <AppModal v-model="moveOpen" title="移动到文件夹" width="440px">
+      <p v-if="moveTarget" class="move-note">《{{ moveTarget.title || '无标题笔记' }}》</p>
+      <p v-if="!folders.length" class="move-empty">还没有文件夹，先在左侧「＋」新建一个并绑定标签</p>
+      <div v-else class="move-list">
+        <button
+          v-for="f in folders"
+          :key="f.id"
+          type="button"
+          class="move-folder"
+          :class="{ 'is-in': folderHasNote(f) }"
+          :disabled="moving"
+          @click="moveToFolder(f)"
+        >
+          <span class="move-folder__name">{{ f.name }}</span>
+          <span class="move-folder__tags">
+            {{ f.tagNames.length ? f.tagNames.join('、') : '未绑定标签' }}
+          </span>
+          <span v-if="folderHasNote(f)" class="move-folder__badge">已在</span>
+        </button>
+      </div>
+      <template #footer>
+        <AppButton @click="moveOpen = false">取消</AppButton>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -558,6 +613,143 @@ watch(keyword, () => {
 })
 watch(selectedFolder, loadList)
 watch(() => tagFilter.value.join(','), loadList)
+
+/* ---------------- 笔记左滑操作：移动 / 删除 ---------------- */
+
+const ACTION_W = 140
+const swipedId = ref(null)
+const swipe = reactive({
+  id: null,
+  startX: 0,
+  startY: 0,
+  offset: 0,
+  dragging: false,
+  moved: false
+})
+
+const moveOpen = ref(false)
+const moveTarget = ref(null)
+const moving = ref(false)
+
+function itemOffset(id) {
+  if (swipe.id === id && swipe.dragging) return swipe.offset
+  return swipedId.value === id ? -ACTION_W : 0
+}
+
+function onSwipeStart(e, n) {
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  if (swipedId.value && swipedId.value !== n.id) swipedId.value = null
+  swipe.id = n.id
+  swipe.startX = e.clientX
+  swipe.startY = e.clientY
+  swipe.offset = swipedId.value === n.id ? -ACTION_W : 0
+  swipe.dragging = false
+  swipe.moved = false
+  e.currentTarget.setPointerCapture?.(e.pointerId)
+}
+
+function onSwipeMove(e, n) {
+  if (swipe.id !== n.id) return
+  const dx = e.clientX - swipe.startX
+  const dy = e.clientY - swipe.startY
+  if (!swipe.moved) {
+    if (Math.abs(dx) < 8) return
+    // 竖向手势交给列表滚动，不抢
+    if (Math.abs(dy) > Math.abs(dx)) {
+      swipe.id = null
+      return
+    }
+    swipe.dragging = true
+    swipe.moved = true
+  }
+  const base = swipedId.value === n.id ? -ACTION_W : 0
+  swipe.offset = Math.max(-ACTION_W, Math.min(0, base + dx))
+}
+
+function onSwipeEnd(e, n) {
+  if (swipe.id !== n.id) return
+  if (swipe.dragging) {
+    swipedId.value = swipe.offset < -ACTION_W / 2 ? n.id : null
+  }
+  swipe.dragging = false
+  swipe.id = null
+}
+
+function onItemClick(n) {
+  if (swipe.moved) {
+    swipe.moved = false
+    return
+  }
+  if (swipedId.value === n.id) {
+    swipedId.value = null
+    return
+  }
+  openNote(n.id)
+}
+
+function openMove(n) {
+  swipedId.value = null
+  moveTarget.value = n
+  moveOpen.value = true
+}
+
+function folderHasNote(folder) {
+  const ids = new Set((moveTarget.value?.tags || []).map((t) => t.id))
+  return (folder.tagIds || []).some((id) => ids.has(id))
+}
+
+async function moveToFolder(folder) {
+  if (!moveTarget.value || moving.value) return
+  if (!folder.tagIds?.length) {
+    toast.warn('这个文件夹还没有绑定标签，无法归入笔记')
+    return
+  }
+  moving.value = true
+  try {
+    const noteId = moveTarget.value.id
+    await noteApi.move(noteId, folder.id)
+
+    const target = notes.value.find((n) => n.id === noteId)
+    if (target) {
+      const have = new Set((target.tags || []).map((t) => t.id))
+      const added = folder.tagIds
+        .filter((id) => !have.has(id))
+        .map((id) => ({ id, name: tags.value.find((t) => t.id === id)?.name || '' }))
+      target.tags = [...(target.tags || []), ...added]
+    }
+    if (draft.value?.id === noteId) {
+      const ids = new Set(draft.value.tagIds)
+      folder.tagIds.forEach((id) => ids.add(id))
+      draft.value.tagIds = [...ids]
+    }
+
+    await loadFolders()
+    await loadList()
+    moveOpen.value = false
+    toast.success(`已归入「${folder.name}」`)
+  } catch (err) {
+    toast.error(err.message)
+  } finally {
+    moving.value = false
+  }
+}
+
+async function deleteFromList(n) {
+  if (!window.confirm(`把《${n.title || '无标题笔记'}》移入回收站？`)) return
+  try {
+    await noteApi.remove(n.id)
+    swipedId.value = null
+    openTabs.value = openTabs.value.filter((t) => t.id !== n.id)
+    const isCurrent = draft.value?.id === n.id
+    if (isCurrent) dirty.value = false
+    await loadList()
+    await loadFolders()
+    if (isCurrent) router.replace('/notes')
+    toast.success('已移入回收站')
+  } catch (err) {
+    toast.error(err.message)
+  }
+}
 
 async function loadFolders() {
   try {
@@ -1555,6 +1747,7 @@ function onBeforeUnload(e) {
 function onDocumentClick(e) {
   if (menu.value && !toolbarEl.value?.contains(e.target)) menu.value = ''
   if (tagPanelOpen.value && !tagMenuEl.value?.contains(e.target)) tagPanelOpen.value = false
+  if (swipedId.value && !e.target.closest?.('.item-wrap')) swipedId.value = null
 }
 
 onMounted(() => {
@@ -1986,16 +2179,59 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
+/* 左滑容器：操作按钮在底层，笔记本身在上层平移 */
+.item-wrap {
+  position: relative;
+  overflow: hidden;
+  margin-bottom: 2px;
+  border-radius: var(--r-sm);
+}
+
+.item-actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 140px;
+  display: flex;
+}
+
+.item-action {
+  flex: 1;
+  border: 0;
+  background: var(--paper-deep);
+  color: var(--ink-2);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.item-action:hover {
+  background: var(--paper-sink);
+}
+
+.item-action--danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
 .item {
+  position: relative;
+  z-index: 1;
   display: block;
   width: 100%;
   text-align: left;
   padding: 10px var(--sp-3);
-  margin-bottom: 2px;
   border: 0;
   border-radius: var(--r-sm);
-  background: transparent;
+  background: var(--paper);
   cursor: pointer;
+  touch-action: pan-y;
+  user-select: none;
+  transition: transform 0.2s ease;
+}
+
+.item.is-swiping {
+  transition: none;
 }
 
 .item:hover {
@@ -2827,6 +3063,75 @@ onBeforeUnmount(() => {
 
 .modal-spacer {
   flex: 1;
+}
+
+/* ---------- 移动到文件夹 ---------- */
+
+.move-note {
+  margin-bottom: var(--sp-3);
+  font-family: var(--font-serif);
+  font-size: var(--fs-sm);
+  color: var(--ink-2);
+}
+
+.move-empty {
+  font-size: var(--fs-sm);
+  color: var(--ink-3);
+  line-height: 1.7;
+}
+
+.move-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.move-folder {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: var(--r-sm);
+  background: var(--sheet);
+  text-align: left;
+  cursor: pointer;
+}
+
+.move-folder:hover {
+  border-color: var(--ink-3);
+  background: var(--paper);
+}
+
+.move-folder.is-in {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.move-folder:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.move-folder__name {
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+
+.move-folder__tags {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+}
+
+.move-folder__badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  font-size: var(--fs-xs);
+  color: var(--accent);
 }
 
 /* 触屏设备没有 hover，文件夹的编辑按钮要常显 */

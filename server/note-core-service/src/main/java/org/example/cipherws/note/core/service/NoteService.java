@@ -37,6 +37,9 @@ public interface NoteService {
 
     Result updateNote(long userId, long noteId, NoteDtos.NoteSaveRequest request);
 
+    /** 把笔记归入文件夹（补上文件夹绑定的标签），不覆盖原有标签与正文 */
+    Result moveToFolder(long userId, long noteId, Long folderId);
+
     /** hard=true 永久删除，否则只进回收站 */
     Result removeNote(long userId, long noteId, boolean hard);
 

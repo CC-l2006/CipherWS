@@ -169,6 +169,22 @@
     </insert>
 
     <!--
+      归入文件夹：把文件夹绑定的标签批量补到笔记上。
+      - INSERT IGNORE：已经有同名标签关联时跳过，不报主键冲突
+      - JOIN note_folder 卡 user_id：别人的文件夹归不进来
+      - EXISTS note：笔记也必须是当前用户的
+    -->
+    <insert id="addFolderTagRelations">
+        INSERT IGNORE INTO `note_tag_rel` (`note_id`, `tag_id`)
+        SELECT #{noteId}, ft.`tag_id`
+        FROM `note_folder_tag` ft
+                 JOIN `note_folder` f ON f.`id` = ft.`folder_id` AND f.`user_id` = #{userId}
+                 JOIN `note_tag` t ON t.`id` = ft.`tag_id` AND t.`user_id` = #{userId}
+        WHERE ft.`folder_id` = #{folderId}
+          AND EXISTS (SELECT 1 FROM `note` n WHERE n.`id` = #{noteId} AND n.`user_id` = #{userId})
+    </insert>
+
+    <!--
       note_tag_rel 本身不带 user_id，所以关联到 note_tag 后用 t.user_id 再兜一层，
       防止关联表里出现别人的标签。
 

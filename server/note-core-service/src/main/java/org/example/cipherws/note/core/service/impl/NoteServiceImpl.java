@@ -10,6 +10,7 @@ import org.example.cipherws.note.core.dto.NoteDtos.NoteVo;
 import org.example.cipherws.note.core.dto.NoteDtos.SummaryVo;
 import org.example.cipherws.note.core.dto.NoteDtos.TagBrief;
 import org.example.cipherws.note.core.mapper.NoteMapper;
+import org.example.cipherws.note.core.mapper.FolderMapper;
 import org.example.cipherws.note.core.service.NoteService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,9 +52,11 @@ public class NoteServiceImpl implements NoteService {
     private static final int DELETED = 1;
 
     private final NoteMapper noteMapper;
+    private final FolderMapper folderMapper;
 
-    public NoteServiceImpl(NoteMapper noteMapper) {
+    public NoteServiceImpl(NoteMapper noteMapper, FolderMapper folderMapper) {
         this.noteMapper = noteMapper;
+        this.folderMapper = folderMapper;
     }
 
     @Override
@@ -128,6 +131,29 @@ public class NoteServiceImpl implements NoteService {
             bindTags(userId, noteId, request.tagIds());
         }
         return Result.ok(requireNoteVo(userId, noteId));
+    }
+
+    /**
+     * 归入文件夹：文件夹本质是「一组标签」，所以移动 = 把文件夹绑定的标签补到笔记上。
+     * 不覆盖笔记原有的其他标签，也不动正文；重复的关联由 INSERT IGNORE 跳过。
+     */
+    @Override
+    @Transactional
+    public Result moveToFolder(long userId, long noteId, Long folderId) {
+        if (folderId == null) {
+            throw new BusinessException("请选择要移动到的文件夹");
+        }
+        requireNoteVo(userId, noteId);
+        if (folderMapper.countOwnedFolder(folderId, userId) == 0) {
+            throw new BusinessException("文件夹不存在");
+        }
+        if (folderMapper.selectFolderTagIds(folderId, userId).isEmpty()) {
+            throw new BusinessException("该文件夹还没有绑定标签，无法归入笔记");
+        }
+        noteMapper.addFolderTagRelations(noteId, folderId, userId);
+        // 归入后让这篇排到列表最前
+        noteMapper.updateNoteFields(noteId, userId, null, null, null);
+        return Result.ok(true);
     }
 
     @Override

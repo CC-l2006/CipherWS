@@ -57,6 +57,8 @@ export const noteApi = {
   detail: (id) => request(`/notes/${id}`),
   create: (body) => request('/notes', { method: 'POST', body }),
   update: (id, body) => request(`/notes/${id}`, { method: 'PUT', body }),
+  /** 把笔记归入文件夹：补上文件夹绑定的标签，不覆盖正文与原有标签 */
+  move: (id, folderId) => request(`/notes/${id}/move`, { method: 'POST', body: { folderId } }),
   remove: (id, hard = false) => request(`/notes/${id}`, { method: 'DELETE', params: { hard } }),
   restore: (id) => request(`/notes/${id}/restore`, { method: 'POST' }),
   trash: (params) => request('/notes/trash', { params }),

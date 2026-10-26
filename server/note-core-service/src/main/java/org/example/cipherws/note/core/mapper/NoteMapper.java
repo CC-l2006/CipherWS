@@ -106,6 +106,14 @@ public interface NoteMapper {
                           @Param("userId") long userId);
 
     /**
+     * 把笔记归入文件夹：把该文件夹绑定的所有标签补到笔记上。
+     * 已存在的关联用 INSERT IGNORE 跳过；笔记或文件夹不属于当前用户时插入 0 行。
+     */
+    int addFolderTagRelations(@Param("noteId") long noteId,
+                              @Param("folderId") long folderId,
+                              @Param("userId") long userId);
+
+    /**
      * 批量取这批笔记的标签（一次查回来，避免每条笔记再查一次）。
      *
      * <p>{@code resultType="map"} 的 key 是**原始列名**（下划线）：
