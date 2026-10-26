@@ -138,5 +138,21 @@ deploy/*backup*.txt
 docker/*.tar
 deploy/**/*.tar
 
+# ---------- 本地数据快照 ----------
+# 数据库导出 / 备份文件（mysqldump 产物）含真实用户数据，不入库。
+# 建表结构走 server/sql/ 下的迁移脚本，不要用整库 dump 代替。
+*-backup*.sql
+*.dump
+
+# ---------- 毕业设计提交资料 ----------
+# docs/毕业设计提交资料/ 存放学校要求提交的表格（项目立项.xlsx、项目历程.xlsx 等），
+# 含个人信息与校内材料，不属于项目代码，不入库。
+# 需要协作或备份时改用网盘 / 学校系统单独传递，不要提交进 Git。
+docs/毕业设计提交资料/
+
 # 用户上传的头像等运行时文件（相对进程工作目录，可能在仓库根）
 uploads/
+
+# 兜底排除：若把 JDK 直接解压到 deploy/ 下（如 deploy/jdk-17/、deploy/jdk17/），同样不入库。
+# 规范位置仍是 deploy/.tools/jdk-17（由 deploy/.tools/fetch-jdk17.ps1 重建），已被上面的 deploy/.tools/ 排除。
+deploy/jdk*/
