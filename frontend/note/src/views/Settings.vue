@@ -209,23 +209,9 @@ onUnmounted(() => {
   newTimer.stop()
 })
 
-/** 后端在「没配 SMTP」的本地环境会把验证码回传，直接填上省一次手输 */
-/**
- * 处理「发验证码」的返回。
- *
- * 配了真邮箱时后端只返回 hint；没配 SMTP 的本地环境会把验证码一起返回，
- * 这里直接填进表单，省一次手动抄写。
- * 注意 formObj 是 reactive 对象（有 code 字段），不是 ref —— 写 formObj.code。
- */
-function absorbCode(res, formObj, hintRef, hintText) {
-  const data = res?.data || {}
-  const hint = data.hint || hintText
-  if (data.code) {
-    formObj.code = data.code
-    hintRef.value = `${hint}（已自动填入）`
-  } else {
-    hintRef.value = hint
-  }
+/** 只展示后端提示；验证码永远不会回传前端，必须人工从邮箱/日志抄录 */
+function absorbCode(res, hintRef, hintText) {
+  hintRef.value = res?.data?.hint || hintText
 }
 
 async function sendOldCode() {
@@ -233,7 +219,7 @@ async function sendOldCode() {
   oldSending.value = true
   try {
     const res = await userApi.sendOldEmailCode()
-    absorbCode(res, oldForm, oldHint, '验证码已发送到当前邮箱')
+    absorbCode(res, oldHint, '验证码已发送到当前邮箱')
     oldTimer.start(res?.data?.cooldown || 60)
   } catch (err) {
     oldErrors.code = err.message
@@ -270,7 +256,7 @@ async function sendNewCode() {
   newErrors.code = ''
   try {
     const res = await userApi.sendNewEmailCode(email)
-    absorbCode(res, newForm, newHint, '验证码已发送到新邮箱')
+    absorbCode(res, newHint, '验证码已发送到新邮箱')
     newTimer.start(res?.data?.cooldown || 60)
   } catch (err) {
     newErrors.email = err.message
@@ -332,7 +318,7 @@ async function sendPwCode() {
   pwSending.value = true
   try {
     const res = await userApi.sendPasswordCode()
-    absorbCode(res, pwForm, pwHint, '验证码已发送到当前邮箱')
+    absorbCode(res, pwHint, '验证码已发送到当前邮箱')
     pwTimer.start(res?.data?.cooldown || 60)
   } catch (err) {
     pwErrors.code = err.message

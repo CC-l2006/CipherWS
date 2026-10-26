@@ -72,11 +72,12 @@ public final class UserDtos {
     /**
      * 发送验证码的结果。
      *
-     * @param code 只在「没配 SMTP 的本地环境」且开了 note.auth.expose-code 时才有值，
-     *             配了真邮箱就永远返回 null —— 那才是验证码该有的样子。
+     * <p>这里**永远不返回验证码本身**。未配置 SMTP 时验证码只写服务端日志，
+     * 前端必须让人工从邮箱（或日志）抄录，避免任何人调接口就能拿到码。</p>
+     *
      * @param cooldown 距下次可发送的秒数，前端拿它做倒计时
      */
-    public record SendCodeRes(String hint, String code, int cooldown) {
+    public record SendCodeRes(String hint, int cooldown) {
     }
 
     /** 更换绑定邮箱第 2 步：新邮箱 + 新邮箱收到的验证码 */

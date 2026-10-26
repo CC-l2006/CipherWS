@@ -124,14 +124,9 @@ async function sendCode() {
 
   sending.value = true
   try {
-    // purpose=register：后端会校验「这个邮箱还没注册过」
+    // 后端只返回提示，不会回传验证码
     const { data } = await authApi.sendCode(email, 'register')
     codeHint.value = data?.hint || '验证码已发送'
-    // 本地没配 SMTP 时后端会把码直接返回，自动填入省一次手输
-    if (data?.code) {
-      form.code = data.code
-      codeHint.value = `${data.hint}（已自动填入）`
-    }
     startCountdown(data?.cooldown || 60)
   } catch (err) {
     errors.email = err.message

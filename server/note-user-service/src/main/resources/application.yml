@@ -76,10 +76,6 @@ note:
     # 必须与 note-gateway 的配置一致，否则网关验不过这里签发的 token
     secret: ${NOTE_JWT_SECRET:cipherws-note-dev-secret-change-me-in-production-32bytes}
     ttl-seconds: ${NOTE_JWT_TTL:7200}
-  auth:
-    # 演示开关：把验证码回传给前端，便于没有邮件服务时跑通找回密码。
-    # ⚠️ 生产环境务必设为 false，否则任何知道邮箱的人都能重置别人的密码。
-    expose-code: ${NOTE_EXPOSE_CODE:true}
 
 management:
   endpoints:

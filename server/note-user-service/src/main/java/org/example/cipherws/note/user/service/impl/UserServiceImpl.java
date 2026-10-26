@@ -124,17 +124,6 @@ public class UserServiceImpl implements UserService {
     @Value("${note.jwt.ttl-seconds:7200}")
     private long jwtTtlSeconds;
 
-    /**
-     * 演示开关：把验证码回传给前端。
-     * 默认 true 是为了让别人克隆下来就能跑通「找回密码 / 绑定邮箱」全流程；
-     * 生产环境必须设 NOTE_EXPOSE_CODE=false，否则任何人拿到邮箱就能重置密码。
-     *
-     * 注意：只有**没配 SMTP**时才会真的把码回给前端 —— 一旦配了真邮箱，
-     * 这里就不再回传，免得配好了邮箱反而还在响应里漏码。
-     */
-    @Value("${note.auth.expose-code:true}")
-    private boolean exposeCode;
-
     public UserServiceImpl(UserMapper userMapper, MailService mailService, AvatarService avatarService) {
         this.userMapper = userMapper;
         this.mailService = mailService;
@@ -318,12 +307,11 @@ public class UserServiceImpl implements UserService {
         }
 
         boolean devMode = !mailService.isEnabled();
+        // 未配置 SMTP 时只提示去日志里看，绝不把验证码放进响应体
         String hint = devMode
                 ? "本地未配置邮箱服务，验证码见服务端日志"
                 : "验证码已发送至 " + mail + "，5 分钟内有效";
-        // 只有「没配真邮箱」且开了演示开关，才把码回给前端
-        String returnedCode = (devMode && exposeCode) ? code : null;
-        return new SendCodeRes(hint, returnedCode, RESEND_COOLDOWN_SECONDS);
+        return new SendCodeRes(hint, RESEND_COOLDOWN_SECONDS);
     }
 
     @Override
